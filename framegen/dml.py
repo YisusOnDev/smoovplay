@@ -321,6 +321,21 @@ class DmlInterpolator:
         b.bind_ortvalue_input("thr", self._thr_in)
         self.mask.run_with_iobinding(b)
 
+    def steady_mask_now(self) -> np.ndarray | None:
+        """The current pair's Steady HUD mask (HxW, 1 = the real pixels), or None while it's off. For debug
+        snapshots only: it runs the mask graph again into the CPU, so it isn't for every frame."""
+        if self.steady <= 0 or self._slot is None:
+            return None
+        shape = self._w_zero.shape()
+        w = np.zeros(shape, dtype=np.float32)
+        b = self.mask.io_binding()
+        b.bind_ortvalue_input("src0", self.slots[1 - self._slot])
+        b.bind_ortvalue_input("src1", self.slots[self._slot])
+        b.bind_ortvalue_input("thr", self._thr_in)
+        b.bind_ortvalue_output("w", self.ort.OrtValue.ortvalue_from_numpy(w))
+        self.mask.run_with_iobinding(b)
+        return w[0, 0, : self.h, : self.w]
+
     def set_steady(self, threshold: float) -> None:
         """Steady HUD on (threshold: largest real-frame difference, 0..1, that counts as still) or off (0)."""
         if threshold > 0:
