@@ -73,11 +73,15 @@ def hud_frames(w: int, h: int, shift: int = 3) -> tuple[np.ndarray, np.ndarray]:
 
 
 @needs_weights
-def test_steady_hud_graphs_match_the_pytorch_path(tmp_path, monkeypatch):
+@pytest.mark.parametrize("halo", [0, 2])
+def test_steady_hud_graphs_match_the_pytorch_path(tmp_path, monkeypatch, halo):
     """The mask graph finds the still HUD's edges and the flow graph puts the real pixels there, as RIFE on CUDA does
     (framegen/steady.py); the moving background stays the model's."""
     from framegen.steady import STEADY_HUD_THRESHOLD, SteadyHud
+    import framegen.steady as steady
     monkeypatch.setattr(dml, "MODEL_DIR", tmp_path)
+    monkeypatch.setattr(dml, "STEADY_HUD_HALO", halo)
+    monkeypatch.setattr(steady, "STEADY_HUD_HALO", halo)
     w, h = 160, 96
     enc_path, flow_path, mask_path = dml.convert(MODEL, 1.0, w, h)
     a, b = hud_frames(w, h)

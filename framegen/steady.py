@@ -28,6 +28,16 @@ STEADY_HUD_THRESHOLD = float(os.environ.get("FRAMEGEN_STEADY_THRESHOLD", "0.03")
 # 32-level step.
 STEADY_HUD_EDGE = 128.0 / 255.0
 STEADY_HUD_EDGE_R = 1
+# Then grown by this many pixels, so the ring around a still glyph (its anti-aliased edge and outline, which change
+# with the scene behind them) gets the real pixels blended at t as well, instead of the model's, which drags the text's
+# edge along with the motion. 0 keeps the mask as it was.
+STEADY_HUD_HALO = int(os.environ.get("FRAMEGEN_STEADY_HALO", "0"))  # env: for trying it out
+
+
+def halo(w: torch.Tensor, n: int | None = None) -> torch.Tensor:
+    """The mask w (1, 1, h, w) grown by n pixels (STEADY_HUD_HALO by default)."""
+    n = STEADY_HUD_HALO if n is None else n
+    return F.max_pool2d(w, 2 * n + 1, 1, n) if n > 0 else w
 
 
 class SteadyHud:
@@ -60,7 +70,7 @@ class SteadyHud:
         thr = self.still_thr.half()
         w = ((thr - d) * (2.0 / thr)).clamp_(0.0, 1.0)
         r = STEADY_HUD_EDGE_R
-        self.w.copy_(w * F.max_pool2d(torch.maximum(self.edge[a], self.edge[b]), 2 * r + 1, 1, r))
+        self.w.copy_(halo(w * F.max_pool2d(torch.maximum(self.edge[a], self.edge[b]), 2 * r + 1, 1, r)))
 
     def blend(self, mid: torch.Tensor, rgb_a: torch.Tensor, rgb_b: torch.Tensor) -> torch.Tensor:
         """The AI frame `mid` (1, 3, h, w) with the real pixels, at t_now, where mask() said."""

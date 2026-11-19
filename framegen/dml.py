@@ -31,7 +31,7 @@ import torch.nn.functional as F
 
 from .fastrife import FastIFNet
 from .interpolator import DEFAULT_MODEL_DIR
-from .steady import STEADY_HUD_EDGE, STEADY_HUD_EDGE_R
+from .steady import STEADY_HUD_EDGE, STEADY_HUD_EDGE_R, STEADY_HUD_HALO, halo
 
 EXPORT_VERSION = 2  # bump when the exported graphs change, so cached files are rebuilt
 MODEL_DIR = DEFAULT_MODEL_DIR / "dml"
@@ -165,8 +165,9 @@ class _MaskGraph(torch.nn.Module):
     """Where Steady HUD acts between two real frames: framegen/steady.py's SteadyHud.mask() without its state, so it
     exports. Both frames' edges are worked out each time (the CUDA path keeps the older one's), in fp32."""
 
-    def __init__(self) -> None:
+    def __init__(self, halo: int = 0) -> None:
         super().__init__()
+        self.halo = halo
         gx = torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]])
         self.register_buffer("sobel", torch.stack([gx, gx.t()]).unsqueeze(1))  # (2, 1, 3, 3): x and y gradients
         self.register_buffer("luma", torch.tensor([0.299, 0.587, 0.114]).view(1, 3, 1, 1))  # RGB
@@ -181,7 +182,7 @@ class _MaskGraph(torch.nn.Module):
         d = (b - a).abs().amax(1, keepdim=True)
         w = ((thr - d) * (2.0 / thr)).clamp(0.0, 1.0)
         r = STEADY_HUD_EDGE_R
-        return w * F.max_pool2d(torch.maximum(self._edge(a), self._edge(b)), 2 * r + 1, 1, r)
+        return halo(w * F.max_pool2d(torch.maximum(self._edge(a), self._edge(b)), 2 * r + 1, 1, r), self.halo)
 
 
 def model_paths(version: str, scale: float, width: int, height: int) -> tuple[Path, Path, Path]:
@@ -189,7 +190,7 @@ def model_paths(version: str, scale: float, width: int, height: int) -> tuple[Pa
     tag = f"rife{version}_{width}x{height}"
     return (MODEL_DIR / f"{tag}_encode_v{EXPORT_VERSION}.onnx",
             MODEL_DIR / f"{tag}_s{scale}_flow_v{EXPORT_VERSION}.onnx",
-            MODEL_DIR / f"{tag}_mask_v{EXPORT_VERSION}.onnx")
+            MODEL_DIR / f"{tag}_mask{f'_h{STEADY_HUD_HALO}' if STEADY_HUD_HALO else ''}_v{EXPORT_VERSION}.onnx")
 
 
 def convert(version: str, scale: float, width: int, height: int) -> tuple[Path, Path, Path]:
@@ -217,7 +218,7 @@ def convert(version: str, scale: float, width: int, height: int) -> tuple[Path, 
                     ["src0", "src1", "t", "w"], ["frame"])
         if not mask_path.exists():
             thr = torch.full((1, 1, 1, 1), 0.03)
-            _export(_MaskGraph(), (src, src.clone(), thr), mask_path, ["src0", "src1", "thr"], ["w"])
+            _export(_MaskGraph(STEADY_HUD_HALO), (src, src.clone(), thr), mask_path, ["src0", "src1", "thr"], ["w"])
     print(f"[dml] prepared in {time.perf_counter() - t0:.0f} s")
     return paths
 

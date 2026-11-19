@@ -65,7 +65,7 @@ def edges_near(a: torch.Tensor, b: torch.Tensor, r: int, level: float) -> torch.
 
 
 def steady(thr: float = STEADY_HUD_THRESHOLD, three: bool = False, grow: bool | None = None,
-           edge_r: int | None = None, edge_level: float = 128.0):
+           edge_r: int | None = None, edge_level: float = 128.0, halo: int = 0):
     """A Steady HUD variant: (mid, a, b, a0) -> frame. three: also unchanged since the real frame before a (a0).
     grow True/False: widen/narrow the still area by a pixel. edge_r: only within edge_r pixels of an edge."""
     def fn(mid, a, b, a0):
@@ -77,6 +77,8 @@ def steady(thr: float = STEADY_HUD_THRESHOLD, three: bool = False, grow: bool | 
             w = _pool(w, grow)
         if edge_r is not None:
             w = w * edges_near(a, b, edge_r, edge_level)
+        if halo:
+            w = F.max_pool2d(w.permute(2, 0, 1).unsqueeze(0), 2 * halo + 1, 1, halo)[0].permute(1, 2, 0)
         return mid + w * (a + 0.5 * (b - a) - mid)
     return fn
 
@@ -88,6 +90,8 @@ VARIANTS = {
     "edges, 1px": steady(edge_r=1),
     "edges, 2px": steady(edge_r=2),
     "edges, 3px": steady(edge_r=3),
+    "edges 1px, halo 1": steady(edge_r=1, halo=1),
+    "edges 1px, halo 2": steady(edge_r=1, halo=2),
     "edges 2px, softer": steady(edge_r=2, edge_level=64.0),
     "edges 2px, 3 frames": steady(three=True, edge_r=2),
 }
