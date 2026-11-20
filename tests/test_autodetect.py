@@ -142,3 +142,68 @@ def test_detect_offers_vfg_only_where_it_can_be_set_up(monkeypatch):
                 "NVIDIA VFG couldn't be checked: boom"):
         r = _detect_on(monkeypatch, why)
         assert "vfg_offer" not in r and "vfg_offer_ready" not in r, why
+
+
+# RX 9070 XT, PS5 Remote Play at 1080p: RIFE alone measured 9.6 ms (full) and 8.4 (half), but a game session logged
+# 13 and 10.8 per tick; at 90 fps that stuttered (queue p50 18.8 ms against 6.2 at 60), and 60 keeps up.
+RX9070XT_RIFE_ONLY = timing(9.6, 8.4, "dml")
+RX9070XT = timing(13.0, 10.8, "dml")  # the whole tick, as time_dml() now times it
+QHD144 = Display(2560, 1440, 144, 144)
+
+
+def test_amd_card_gets_the_rate_a_session_keeps_up_with():
+    old = recommend(DEFAULTS, RX9070XT_RIFE_ONLY, QHD144, gpu="AMD Radeon RX 9070 XT", trt=False)
+    assert old["settings"]["hz"] == 90  # what RIFE alone suggested
+    r = recommend(DEFAULTS, RX9070XT, QHD144, gpu="AMD Radeon RX 9070 XT", trt=False,
+                  vsr="it needs an NVIDIA RTX card")
+    assert (r["settings"]["hz"], r["settings"]["motion"]) == (60, "auto")  # 60 fps, full detail
+    assert "DirectML" in r["reasons"]["engine"]
+
+
+def test_nvidia_cards_unchanged_at_144_hz():
+    assert pick(display=QHD144)["settings"] == {"hz": 90, "motion": "auto", "engine": "auto", "scaler": "fsr"}
+    assert pick(t=timing(5.0, 3.5), display=QHD144)["settings"]["hz"] == 120
+
+
+def test_directml_test_times_the_whole_tick(monkeypatch):
+    """time_dml() times what a session does per tick with DirectML (frames on the CPU), not RIFE alone."""
+    import time
+
+    import numpy as np
+    import torch
+
+    from framegen import autodetect, cadence, dml
+
+    calls = []
+
+    class FakeDml:
+        def __init__(self, w, h, model, scale):
+            self.in_u8 = torch.zeros((h, w, 3), dtype=torch.uint8)
+            self.out_u8 = torch.zeros((h, w, 3), dtype=torch.uint8)
+
+        def load(self, frame):
+            assert isinstance(frame, np.ndarray)
+            np.copyto(self.in_u8.numpy(), frame)
+            calls.append("load")
+
+        def prepare(self, slot):
+            time.sleep(0.002)
+            calls.append("prepare")
+
+        def interpolate(self, slot, t=0.5):
+            time.sleep(0.002)
+            calls.append("interpolate")
+            return self.out_u8
+
+    checked = []
+    real_update = cadence.DuplicateDetector.update
+    monkeypatch.setattr(cadence.DuplicateDetector, "update",
+                        lambda self, f: checked.append(1) or real_update(self, f))
+    monkeypatch.setattr(dml, "DmlInterpolator", FakeDml)
+    lines = []
+    out = autodetect.time_dml("4.22.lite", log=lines.append)
+    assert set(out) == {"full", "half"} and all(v["engine"] == "dml" for v in out.values())
+    assert all(v["ms"] >= 4.0 for v in out.values())  # at least prepare + interpolate
+    ticks = 2 * 7 * 12  # each motion detail: 7 rounds of 12 ticks (RIFE alone is timed too, without loads)
+    assert calls.count("load") == ticks + 2 and len(checked) == ticks + 2
+    assert sum("with the frame copies and checks" in m for m in lines) == 2

@@ -6,7 +6,8 @@ The launcher's Settings page runs it ("Auto-detect"), and setup applies it to a 
     python -m framegen.autodetect --apply --if-new   # only when there's no settings file yet (what setup runs)
 
 The test times RIFE on a 1080p frame (the Remote Play stream) for a few seconds: one new real frame plus one in-between
-frame, at full and at half motion detail, each with the engine "Auto" runs there (DirectML without an NVIDIA card).
+frame, at full and at half motion detail, each with the engine "Auto" runs there (DirectML without an NVIDIA card,
+where the frame copies and checks a session adds on the CPU are timed too).
 If NVIDIA VFG is set up, it times its three quality modes the same way. recommend() turns those times and the display into settings; it's a plain
 function, so the tests can try it on any PC.
 
@@ -151,30 +152,66 @@ def time_rife(model: str, log: Callable[[str], None] = print) -> dict:
 
 def time_dml(model: str, log: Callable[[str], None] = print) -> dict:
     """time_rife() for the DirectML engine (an AMD or Intel card; framegen/dml.py). Each tick waits for its frame
-    (it comes back to the CPU), so a plain clock times it, CPU<->GPU copies included, as a session has them."""
+    (it comes back to the CPU), so a plain clock times it.
+
+    With DirectML the frames live on the CPU, so a session's tick (pipeline.Pipeline.run) is more than RIFE: the new
+    frame is copied into the pipeline's buffer and then into the engine's input, checked for new-or-repeat
+    (cadence.DuplicateDetector, on the CPU here), uploaded (prepare), and the in-between frame downloaded (interpolate)
+    and copied out for the window. All of that is timed, as the pipeline does it. On an RX 9070 XT, RIFE alone
+    (upload and download included) measured 8.4 ms at half motion detail and 9.6 at full, while a game session logged
+    10.8 and 13: Auto-detect then suggested 90 fps, which stuttered, where 60 keeps up. (With CUDA, the copies and
+    the check run on the graphics card alongside RIFE, so time_rife() leaves them out.)"""
+    import numpy as np
     import torch
 
+    from .cadence import DuplicateDetector
     from .dml import DmlInterpolator
 
     w, h = STREAM
-    frame = torch.randint(0, 256, (h, w, 3), dtype=torch.uint8)
+    g = torch.Generator().manual_seed(1)
+    frames = [torch.randint(0, 256, (h, w, 3), dtype=torch.uint8, generator=g).numpy() for _ in range(2)]
+    staging = np.empty((h, w, 3), dtype=np.uint8)  # Pipeline._in_np
+    handed = np.empty((h, w, 3), dtype=np.uint8)  # Pipeline._out_np, what the window gets
     out = {}
     for motion, scale in (("full", 1.0), ("half", 0.5)):
         log(f"timing the AI model at {motion} motion detail (DirectML)")
         it = DmlInterpolator(w, h, model, scale)
-        it.load(frame)
+        detector = DuplicateDetector(learn=True)  # as for PS5 Remote Play (sources.make_detector)
+        it.load(frames[0])
         it.prepare(0)
-        rounds = []
-        for r in range(7):  # the first two let the card's clocks come up from idle
-            t0 = time.perf_counter()
-            for _ in range(12):
-                it.prepare(1)
-                it.interpolate(1, 0.5)
-            if r >= 2:
-                rounds.append((time.perf_counter() - t0) * 1000 / 12)
-        out[motion] = {"ms": round(sorted(rounds)[len(rounds) // 2], 2), "engine": "dml", "estimated": False}
+        detector.update(it.in_u8)
+        n = 0
+
+        def rife() -> None:
+            it.prepare(1)
+            it.interpolate(1, 0.5)
+
+        def tick() -> None:
+            nonlocal n
+            n += 1
+            np.copyto(staging, frames[n % 2])
+            it.load(staging)
+            detector.update(it.in_u8)
+            rife()
+            np.copyto(handed, it.out_u8.numpy())
+
+        rife_ms, tick_ms = _time_rounds(rife), _time_rounds(tick)
+        log(f"  RIFE {rife_ms:.1f} ms, with the frame copies and checks a session adds {tick_ms:.1f} ms")
+        out[motion] = {"ms": round(tick_ms, 2), "engine": "dml", "estimated": False}
         del it
     return out
+
+
+def _time_rounds(step: Callable[[], None], rounds: int = 7, per_round: int = 12) -> float:
+    """Median ms of `step`, by a plain clock (for steps that wait for their own result)."""
+    times = []
+    for r in range(rounds):  # the first two let the card's clocks come up from idle
+        t0 = time.perf_counter()
+        for _ in range(per_round):
+            step()
+        if r >= 2:
+            times.append((time.perf_counter() - t0) * 1000 / per_round)
+    return sorted(times)[len(times) // 2]
 
 
 def _time_ticks(it) -> float:
