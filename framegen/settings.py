@@ -274,9 +274,9 @@ SPECS: tuple[Spec, ...] = (
     Spec("match_hz", "Match refresh rate", (True, False), True, ON_OFF, group="Display",
          applies=("fullscreen", (True,)),
          help="In fullscreen, sets the monitor to a refresh rate that fits the frame rate, such as 120 Hz for "
-              "60 fps on a 144 Hz monitor, so every frame stays up for the same time. Your own rate comes back "
-              "when you leave fullscreen or close SmoovPlay.",
-         impact={"picture": "Even frame pacing, no 2-3-2 refresh beat.",
+              "60 fps on a 144 Hz monitor, so frames don't alternate between 2 and 3 refreshes. Your own rate "
+              "comes back when you leave fullscreen or close SmoovPlay.",
+         impact={"picture": "No 2-3-2 refresh beat.",
                  "speed": "The screen goes black for a second when it switches."}),
     # framegen/dxgi_present.py. Standard stays the default until Low delay has been measured on more PCs.
     Spec("present", "Window presentation", ("gl", "dxgi"), "gl", {"gl": "Standard", "dxgi": "Low delay (Experimental)"},

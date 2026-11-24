@@ -768,6 +768,7 @@ class Pipeline:
                     pass  # shown above
                 elif action is Action.INTERP and catch_up and early_cmd is None:
                     out, action = tick.frame, Action.CURRENT  # shown at once (and again next tick, as a repeat)
+                    quarter_due = False  # (120 Hz: no 3/4 frame after it either)
                     st.caught_up += 1
                 elif action is Action.INTERP:
                     t_model = time.perf_counter()
