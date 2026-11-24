@@ -142,6 +142,7 @@ made-up PCs.
 | FSR sharpening | Max … Minimal | live |
 | RTX VSR quality | Low / Medium / High / Ultra (Experimental: RTX VSR comes with NVIDIA VFG's download) | live |
 | Stats overlay, Fullscreen, VSync | On / Off | live |
+| Match refresh rate | On / Off (fullscreen only: the monitor at the fastest rate that is a whole multiple of the output, such as 120 Hz for 60 fps on a 144 Hz monitor; Windows' temporary mode, put back on leaving fullscreen or closing; `framegen/refresh.py`) | live |
 | Stats overlay style | Minimal (frames on screen, the game's rate, the delay, a keeping-up dot) / Detailed | live |
 | Stats overlay position, size | Top left / Top right / Bottom left / Bottom right; Small (out of the HUD's way) / Medium / Large | live |
 | Window presentation | Standard / Low delay (Experimental: DXGI flip model, so a window skips the compositor's copy and G-Sync works in a window; fullscreen uses Standard; `--present gl\|dxgi`). With Windows' HDR on for the main display it's always DXGI, fullscreen as a borderless window: OpenGL's own fullscreen switches the display to SDR while it's in front (`FRAMEGEN_KEEP_HDR=0` turns this off) | next Play |

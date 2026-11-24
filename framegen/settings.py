@@ -270,6 +270,14 @@ SPECS: tuple[Spec, ...] = (
               "tearing, with a little more delay. With a G-Sync or FreeSync display, On gives you both: no tearing "
               "and low delay.",
          impact={"picture": "On: no tear lines.", "speed": "On can add up to one refresh of delay: 8 ms at 120 Hz, 17 at 60."}),
+    # framegen/refresh.py: Windows' temporary display mode, put back when fullscreen ends or SmoovPlay closes.
+    Spec("match_hz", "Match refresh rate", (True, False), True, ON_OFF, group="Display",
+         applies=("fullscreen", (True,)),
+         help="In fullscreen, sets the monitor to a refresh rate that fits the frame rate, such as 120 Hz for "
+              "60 fps on a 144 Hz monitor, so every frame stays up for the same time. Your own rate comes back "
+              "when you leave fullscreen or close SmoovPlay.",
+         impact={"picture": "Even frame pacing, no 2-3-2 refresh beat.",
+                 "speed": "The screen goes black for a second when it switches."}),
     # framegen/dxgi_present.py. Standard stays the default until Low delay has been measured on more PCs.
     Spec("present", "Window presentation", ("gl", "dxgi"), "gl", {"gl": "Standard", "dxgi": "Low delay (Experimental)"},
          live=False, group="Display", applies=("fullscreen", (False,)),

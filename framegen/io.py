@@ -553,6 +553,8 @@ class GLWindowSink:
         self.overlay, self.cmd, self.windowed_pos, self.remote = st.overlay, None, None, None
         self.fill, self.panorama = st.fill, None  # Fill the screen (framegen/fill.py); Panorama's pass once used
         self._borderless = False  # fullscreen as a borderless window (_set_borderless)
+        from .refresh import RefreshMatch
+        self.refresh = RefreshMatch()  # the monitor's refresh rate, matched to the output while fullscreen
         glfw.set_key_callback(self.win, self._on_key)
         glfw.set_cursor_pos_callback(self.win, self._on_mouse)
         self._hint_next = 0.0  # moving the mouse shows the keys again, at most this often
@@ -659,6 +661,7 @@ class GLWindowSink:
         else:
             if st.fullscreen:
                 self._set_fullscreen(True)
+                self._match_refresh()
             self.take_focus()
 
     def take_focus(self) -> None:
@@ -947,6 +950,7 @@ class GLWindowSink:
                 self.toast("Fullscreen starts next time you press Play: Low delay works in a window only", 5.0)
                 return
             self._set_fullscreen(st.fullscreen)
+            self._match_refresh()
             if (st.fullscreen and self.dx is None and self.overlay_of is None and KEEP_HDR and windows_hdr_on()):
                 # Windows' HDR was turned on after the window opened (with OpenGL's own presentation)
                 self.toast("Windows' HDR is on now: fullscreen switches the display to SDR until you press Play again",
@@ -954,6 +958,8 @@ class GLWindowSink:
                 return
         elif key == "vsync":
             glfw.swap_interval(1 if st.vsync else 0)
+        elif key in ("hz", "match_hz"):
+            self._match_refresh()
         elif key in ("look", "look_on"):
             if not self.menu.open:
                 self.toast(f"Look: {self.looks.name() if st.look_on else 'Off'}")
@@ -1068,6 +1074,24 @@ class GLWindowSink:
             glfw.set_window_monitor(win, mon, 0, 0, mode.size.width, mode.size.height, mode.refresh_rate)
         _say_if_slow("fullscreen " + ("on" if on else "off"), t0)
         glfw.swap_interval(1 if self.settings.vsync else 0)
+
+    def _match_refresh(self) -> None:
+        """Fullscreen with Match refresh rate on: the monitor at a rate that's a whole multiple of the output (120 Hz
+        for 60 fps on a 144 Hz monitor, framegen/refresh.py); otherwise its own rate back. Not for window capture's
+        overlay, which sits over another program's window."""
+        st = self.settings
+        want = (sys.platform == "win32" and self.overlay_of is None and st.fullscreen
+                and getattr(st, "match_hz", True))
+        try:
+            if want:
+                from .window import monitor_of
+                line = self.refresh.match(monitor_of(self.glfw.get_win32_window(self.win))[1], int(st.hz))
+            else:
+                line = self.refresh.restore()
+        except Exception as e:  # noqa: BLE001 - a display that won't say or switch: play at its own rate
+            line = f"[display] refresh rate left as it is ({e})"
+        if line:
+            print(line, flush=True)
 
     def _monitor_under_window(self):
         """Where fullscreen goes: the monitor the window is mostly on, so F fills the screen it was moved to rather
@@ -1533,6 +1557,9 @@ class GLWindowSink:
         self.looks.close()
         if self.interop is not None:
             self.interop.close()
+        line = self.refresh.restore()  # (Windows would put it back anyway once SmoovPlay exits)
+        if line:
+            print(line, flush=True)
         if self.dx is not None:
             self.dx.close()
             self.glfw.destroy_window(self.glwin)
