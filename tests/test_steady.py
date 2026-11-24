@@ -30,6 +30,21 @@ def test_it_acts_on_still_edges_only():
     assert w[8, 12] == 0.0  # inside the box, away from its edges: the model's (a flat area isn't painted over)
 
 
+def test_halo_grows_it_around_still_edges(monkeypatch):
+    import framegen.steady as steady
+    a, b = _scene(0), _scene(3)
+    masks = {}
+    for n in (0, 2):
+        monkeypatch.setattr(steady, "STEADY_HUD_HALO", n)
+        hud = SteadyHud(H, W, "cpu")
+        hud.edges(0, a)
+        hud.mask(0, 1, a, b)
+        masks[n] = hud.w[0, 0]
+    assert masks[0][2, 10] == 0.0 and masks[2][2, 10] == 1.0  # just outside the box: the moving scene behind it
+    assert masks[2][20, 30] == 0.0  # well away from the HUD: still the model's
+    assert torch.all(masks[2] >= masks[0])
+
+
 def test_blend_takes_the_real_pixels_at_t():
     hud = SteadyHud(H, W, "cpu")
     a, b = _scene(0), _scene(3)
