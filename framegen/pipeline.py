@@ -112,6 +112,10 @@ class ShownRate:
 # How long the game has to stay off the rate that's needed before the overlay says so, and before the one-off message
 RATE_NOTE_S, RATE_TOAST_S = 3.0, 10.0
 # Said when "Simulate a 30 fps game" goes off by itself: the game was at 30 fps already, and Simulate halved it
+# A new frame this far behind (from when it was ready to when its tick starts), twice running, is shown without the
+# in-between frame before it, to catch up (Pipeline.run). 1.5 ticks: above the usual wait after an in-between frame
+# that overran its tick, which the next tick makes up.
+CATCH_UP_MS = 1000 * TICK * 1.5
 SIMULATE_OFF = "Simulate turned off: this game is at about {g} fps already, and Simulate halved that"
 
 
@@ -141,6 +145,8 @@ class Stats:
     proc_interp_ms: list[float] = field(default_factory=list)  # tick processing when we interpolate
     proc_other_ms: list[float] = field(default_factory=list)  # tick processing otherwise
     sink_ms: list[float] = field(default_factory=list)  # time spent in display/encode
+    detect_ms: list[float] = field(default_factory=list)  # the new-or-repeat check, every tick
+    model_ms: list[float] = field(default_factory=list)  # making the tick's last in-between frame, waited for
     queue_ms: list[float] = field(default_factory=list)  # arrival -> processing starts (backlog)
     score_ms: list[float] = field(default_factory=list)  # --score, done after the frame is shown
     busy_ms: list[float] = field(default_factory=list)  # processing + display per tick
@@ -168,6 +174,7 @@ class Stats:
     quarter_shown: int = 0  # 90/120 Hz: extra in-between frames shown (1/4 and 3/4, or 1/3)
     quarter_skipped: int = 0  # ones skipped because the pipeline was behind (shown at 60 Hz instead)
     behind: int = 0  # ticks whose frame waited for the pipeline to finish earlier ones (more than 60% of a tick)
+    caught_up: int = 0  # in-between frames left out to catch up, the game's frames running behind (CATCH_UP_MS)
     hz_used: set = field(default_factory=set)  # output rates used during the run
     simulated: int = 0  # ticks played with "Simulate a 30 fps game" on
     # Frames played in test mode, by the source's word on whether the game itself drew each one new or repeated one.
@@ -237,6 +244,7 @@ class Stats:
         lines += self.delay_tests
         lines[0] += f"  ({n / max(self.wall_s, 1e-9):.1f} ticks/s)"
         rows = (("processing, interp ticks", self.proc_interp_ms), ("processing, other ticks", self.proc_other_ms),
+                ("  of which new-or-repeat check", self.detect_ms), ("  of which in-between frame", self.model_ms),
                 ("display/encode", self.sink_ms), ("scoring, after display", self.score_ms),
                 ("queueing (backlog)", self.queue_ms),
                 ("real frame arrival->presented", self.real_delay_ms))
@@ -248,6 +256,9 @@ class Stats:
             lines.append(f"stale frames skipped at start (queued before this run): {self.stale}")
         lines.append(f"ticks over the {TICK * 1000:.1f} ms budget (processing + display): "
                      f"{sum(b > TICK * 1000 for b in self.busy_ms)}")
+        if self.caught_up:
+            lines.append(f"in-between frames left out to catch up (two new frames in a row over "
+                         f"{CATCH_UP_MS:.0f} ms behind): {self.caught_up}")
         if self.quarter_shown or self.quarter_skipped:
             due = self.quarter_shown + self.quarter_skipped
             lines.append(f"extra in-between frames (90/120 Hz) shown {self.quarter_shown} of {due} "
@@ -403,6 +414,7 @@ class Pipeline:
         self.stats = st
         quarter_due = False  # 120 Hz: the previous tick interpolated, so this repeat tick owes the 3/4 frame
         behind_ms = 1000 * TICK * 0.6  # start-of-tick lag above which the extra frames are skipped
+        was_late = False  # the last new frame was over CATCH_UP_MS behind
         gap = 0.95 / hz  # time between two presents, 5% short so the schedule has slack to catch up
         next_due = 0.0
         cuts = CutDetector(self.cut_threshold)
@@ -559,7 +571,9 @@ class Pipeline:
             else:
                 np.copyto(self._in_np, tick.frame)
                 it.load(self._in_pinned)
+            t_detect = time.perf_counter()
             diff = self.detector.update(it.in_u8)
+            st.detect_ms.append((time.perf_counter() - t_detect) * 1000)
             # A source that knows better (the frame tap's flags, test mode) overrides the image check.
             is_new = diff.is_new if tick.new_hint is None else tick.new_hint
             # Dip smoothing, by the picture's own call (the 30 fps lock below can't see a dip); not in
@@ -637,6 +651,13 @@ class Pipeline:
             t_avail = tick.t_arrival if tick.t_ready is None else tick.t_ready
             behind = (t0 - t_avail) * 1000 >= behind_ms
             st.behind += behind
+            # Catch up: a second new frame in a row over CATCH_UP_MS behind is shown as it is, without the in-between
+            # frame before it. A one-off delay drains by itself over the next (cheaper) ticks; two running means it's
+            # stuck behind, which would otherwise last (each pair of ticks only just fits in the time of two).
+            late = is_new and (t0 - t_avail) * 1000 >= CATCH_UP_MS
+            catch_up = late and was_late and sink is not None and gt_fn is None
+            if is_new:
+                was_late = late and not catch_up
             extra_ok = hz > 60 and sink is not None and not behind
 
             def present(frame, text: str):
@@ -745,8 +766,13 @@ class Pipeline:
                 quarter_due = action is Action.INTERP
                 if timed:
                     pass  # shown above
+                elif action is Action.INTERP and catch_up and early_cmd is None:
+                    out, action = tick.frame, Action.CURRENT  # shown at once (and again next tick, as a repeat)
+                    st.caught_up += 1
                 elif action is Action.INTERP:
+                    t_model = time.perf_counter()
                     out = self._generated(it.interpolate(slot, mid_t), gpu_out)
+                    st.model_ms.append((time.perf_counter() - t_model) * 1000)
                     # --score has ground truth only at the midpoint
                     if gt_fn is not None and key_gpu is not None and mid_t == 0.5:
                         to_score = (key_frame, key_content)  # scored once the frame is on screen
