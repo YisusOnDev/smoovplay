@@ -47,8 +47,16 @@ class _DEVMODE(ctypes.Structure):  # DEVMODEW, display fields
                 ("dmReserved2", wt.DWORD), ("dmPanningWidth", wt.DWORD), ("dmPanningHeight", wt.DWORD)]
 
 
+_U32 = None
+
+
 def _u32():
-    u32 = ctypes.windll.user32
+    # Our own user32, not ctypes.windll's shared one: window.py gives the same calls argtypes with its own DEVMODE,
+    # and setting them here broke its monitor lookups for the rest of the session
+    global _U32
+    if _U32 is None:
+        _U32 = ctypes.WinDLL("user32")
+    u32 = _U32
     u32.EnumDisplaySettingsW.argtypes = [wt.LPCWSTR, wt.DWORD, ctypes.POINTER(_DEVMODE)]
     u32.ChangeDisplaySettingsExW.argtypes = [wt.LPCWSTR, ctypes.POINTER(_DEVMODE), wt.HWND, wt.DWORD,
                                              ctypes.c_void_p]

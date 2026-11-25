@@ -91,3 +91,21 @@ def test_the_window_matches_in_fullscreen_only(monkeypatch):
     sink.overlay_of, sink.settings = object(), SimpleNamespace(fullscreen=True, match_hz=True, hz=60)
     sink._match_refresh()
     assert seen == [("match", "D", 60), ("restore",), ("restore",), ("restore",)]
+
+
+def test_leaves_the_shared_user32_that_window_py_uses_alone():
+    # Live session: after the first switch, window.monitor_of failed with "expected LP__DEVMODE instance instead of
+    # pointer to _DEVMODE", so every later fullscreen or output change left the rate as it was
+    import ctypes
+    import sys
+
+    import pytest
+    if sys.platform != "win32":
+        pytest.skip("Windows only")
+    from framegen import window
+    window._api()
+    before = ctypes.windll.user32.EnumDisplaySettingsW.argtypes
+    hwnd = ctypes.windll.user32.GetDesktopWindow()
+    refresh.rates(window.monitor_of(hwnd)[1])
+    assert ctypes.windll.user32.EnumDisplaySettingsW.argtypes == before
+    window.monitor_of(hwnd)  # still works
