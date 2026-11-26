@@ -494,8 +494,12 @@ class Pipeline:
                 return
             frame, text, arrival = held
             held = None
+            t_show = time.perf_counter()
             held_cmd = show(frame, text) or held_cmd
             t_now = time.perf_counter()
+            # (in display/encode as any present, though inside the next tick's processing: a swap that blocks shows
+            # there, not as a slower model)
+            st.sink_ms.append((t_now - t_show) * 1000)
             st.real_delay_ms.append((t_now - arrival) * 1000)
             st.even_held += 1
             if mid_at is not None:
@@ -809,7 +813,6 @@ class Pipeline:
                 if timed:
                     pass  # shown above
                 elif action is Action.INTERP and catch_up and early_cmd is None:
-                    held = None  # (Even 60 fps: the held frame would only flash before this newer one)
                     out, action = tick.frame, Action.CURRENT  # shown at once (and again next tick, as a repeat)
                     quarter_due = False  # (120 Hz: no 3/4 frame after it either)
                     st.caught_up += 1

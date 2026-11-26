@@ -3,9 +3,11 @@ follow on its repeat tick a few ms later, so the in-between frame only flashed (
 DirectML session). With the setting on, the real frame is held for the start of the next model call, so both stay
 up for about a tick, without sleeping, without the queue growing, and with catch-up still working. Off changes
 nothing. CPU only, stand-ins as in test_catch_up; gaps are between present calls, as a sink sees them."""
+import sys
 import time
 
 import numpy as np
+import pytest
 import torch
 
 from framegen.io import TICK, Tick, Waiting
@@ -13,6 +15,10 @@ from framegen.pipeline import CATCH_UP_MS
 from framegen.settings import BY_KEY, Settings
 from test_120fps import AI, _pipeline, _Sink
 from test_catch_up import _busy, _paced_game, _SlowInterp
+
+# A beat measured in real time, to a few ms: GitHub's shared macOS machines came out 7.5 ms off on another such
+# check (tests/test_sources.py), and SmoovPlay doesn't run on macOS yet
+_beat = pytest.mark.skipif(sys.platform == "darwin", reason="a real-time beat, to a few ms")
 
 
 class _TimedSink(_Sink):
@@ -56,6 +62,7 @@ def test_off_by_default_and_says_it_costs_delay():
     assert "delay" in spec.help and "delay" in spec.impact["speed"]
 
 
+@_beat
 def test_on_the_in_between_and_real_frames_stay_up_about_as_long():
     # As the real machine: 15 ms of model and 4 ms of everything else a tick, 1.2 ms to present
     st, sink = _run(_SlowInterp(15.0, tick_ms=4.0), _paced_game(240), even=True)
@@ -64,10 +71,12 @@ def test_on_the_in_between_and_real_frames_stay_up_about_as_long():
     assert abs(m - 1000 * TICK) < 3.0 and abs(r - 1000 * TICK) < 3.0, (m, r)
     assert 0.8 < m / r < 1.25, (m, r)
     assert st.even_held > 90 and st.caught_up == 0
+    assert len(st.sink_ms) == len(sink.shown)  # every present in display/encode, held ones too
     assert abs(np.median(st.even_gap_ms) - m) < 1.0  # the log's figure is the same gap
     assert "even 60 fps:" in st.summary()
 
 
+@_beat
 def test_off_nothing_changes_the_in_between_frame_still_flashes():
     st, sink = _run(_SlowInterp(15.0, tick_ms=4.0), _paced_game(240), even=False)
     mid, real = _gaps(sink)
@@ -75,6 +84,7 @@ def test_off_nothing_changes_the_in_between_frame_still_flashes():
     assert st.even_held == 0 and not st.even_gap_ms and "even 60 fps" not in st.summary()
 
 
+@_beat
 def test_the_same_frames_in_the_same_order_and_the_delay_it_costs():
     on, s_on = _run(_SlowInterp(15.0, tick_ms=4.0), _paced_game(180), even=True)
     off, s_off = _run(_SlowInterp(15.0, tick_ms=4.0), _paced_game(180), even=False)
@@ -105,6 +115,7 @@ def test_on_a_pipeline_that_cant_keep_up_still_catches_up():
     assert sink.shown.count(AI + 2) >= s_off.shown.count(AI + 2) - 5
 
 
+@_beat
 def test_a_fast_model_is_left_alone():
     # A 3 ms model: the next model call comes too soon after the frames arrive, so holding would make it worse
     st, sink = _run(_SlowInterp(3.0, tick_ms=2.0), _paced_game(180), even=True)
