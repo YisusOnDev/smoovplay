@@ -356,3 +356,63 @@ def test_frames_keep_the_cards_numbers_when_the_queue_drops_some(tmp_path):
     seqs = [t.extra["seq"] for t in ticks]
     assert len(ticks) < len(frames)
     assert seqs == sorted(set(seqs)) and seqs == [round(t.t_source * 240) for t in ticks]
+
+
+# ---- CUDA graph capture: the card's GPU work waits for it, as the Remote Play reader's does
+def test_the_cards_conversion_holds_the_cuda_graph_lock(tmp_path, monkeypatch):
+    # A user's RTX 4090 with a capture card and RIFE on TensorRT: the NV12 conversion ran while the interpolator
+    # captured its CUDA graphs, CUDA refused it (cudaErrorStreamCaptureImplicit) and the capture stopped at once
+    from framegen.sync import CAPTURE_LOCK
+    a, _ = _blocks(seed=5)
+    h, w = a.shape[:2]
+    held = []
+    convert_raw = c.CardSource._convert_raw
+    monkeypatch.setattr(c.CardSource, "_convert_raw",
+                        lambda self, data: (held.append(CAPTURE_LOCK.locked()), convert_raw(self, data))[1])
+    src = c.CardSource.raw_file(_raw_file(tmp_path, [a, a, a]), w, h, "nv12", fps=240, device="cpu",
+                                colour=(False, False))
+    assert len(list(src)) == 3
+    src.close()
+    assert held == [True] * 3
+
+
+def test_a_video_file_through_the_raw_path_holds_it_too(tmp_path, monkeypatch):
+    from framegen.sync import CAPTURE_LOCK
+    frames = [_blocks(seed=s)[0] for s in (30, 31)]
+    h, w = frames[0].shape[:2]
+    path = str(tmp_path / "clip.avi")
+    out = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), 60, (w, h))
+    for f in frames:
+        out.write(f)
+    out.release()
+    held = []
+    convert_raw = c.CardSource._convert_raw
+    monkeypatch.setattr(c.CardSource, "_convert_raw",
+                        lambda self, data: (held.append(CAPTURE_LOCK.locked()), convert_raw(self, data))[1])
+    src = c.CardSource.video_file(path, device="cpu", colour=(False, False))
+    assert len(list(src)) == 2
+    src.close()
+    assert held == [True, True]
+
+
+def test_no_frame_comes_while_a_cuda_graph_is_being_captured(tmp_path):
+    import threading
+    import time
+
+    from framegen.sync import CAPTURE_LOCK
+    a, _ = _blocks(seed=6)
+    h, w = a.shape[:2]
+    got, done = [], threading.Event()
+    with CAPTURE_LOCK:  # the interpolator capturing its graphs
+        src = c.CardSource.raw_file(_raw_file(tmp_path, [a, a]), w, h, "nv12", fps=240, device="cpu",
+                                    colour=(False, False))
+
+        def take():
+            got.extend(t for t in src if hasattr(t, "frame"))  # (not the "waiting for the card" notes)
+            done.set()
+        threading.Thread(target=take, daemon=True).start()
+        time.sleep(0.3)
+        assert got == []  # waiting for the lock
+    assert done.wait(5)
+    src.close()
+    assert len(got) == 2

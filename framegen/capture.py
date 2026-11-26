@@ -36,6 +36,8 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
+from .sync import CAPTURE_LOCK
+
 # Raw formats, best first: NV12 is the smallest uncompressed format (4:2:0), YUY2/UYVY are 4:2:2 (more USB bandwidth,
 # same picture after 4:2:0 HDMI sources). Anything compressed comes after all of them, MJPEG last but one.
 RAW_RANK = {"nv12": 0, "yuyv422": 1, "uyvy422": 2, "yuv420p": 3, "bgr24": 4, "bgr0": 4, "rgb24": 4}
@@ -687,7 +689,8 @@ class CardSource:
                     t_arrival = time.perf_counter()
                     start = fr.time if start is None else start
                     raw = fr.reformat(format=self.decode_to, dst_colorspace=space, dst_color_range=rng)
-                    frame = self._convert_raw(raw.to_ndarray().ravel())
+                    with CAPTURE_LOCK:  # no GPU work while the pipeline captures its CUDA graphs (startup only)
+                        frame = self._convert_raw(raw.to_ndarray().ravel())
                     if frame is not None:
                         yield frame, t_arrival, fr.time
             return
@@ -698,7 +701,11 @@ class CardSource:
             if packet.stream is not self.stream:
                 self._sound(packet, t_arrival)
                 continue
-            frame = self._convert(packet)
+            # The conversion (NV12 to BGR, NVDEC's MJPEG) runs on CUDA's legacy default stream: during the
+            # interpolator's CUDA graph capture at startup that breaks the capture and stops this thread
+            # (cudaErrorStreamCaptureImplicit), so it waits for it, as the Remote Play reader does
+            with CAPTURE_LOCK:
+                frame = self._convert(packet)
             if frame is DAMAGED:
                 yield None, t_arrival, None
                 continue
