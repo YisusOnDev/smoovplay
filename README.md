@@ -28,6 +28,33 @@
   <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-3A4250?style=flat-square"></a>
 </p>
 
+> [!NOTE]
+> **Este es el fork de YisusOnDev, no el SmoovPlay oficial.** Es SmoovPlay 0.3.13 con unas mejoras que hemos
+> probado jugando, en un PC con AMD Radeon RX 9070 XT y en otro con NVIDIA RTX 4090 y capturadora. El SmoovPlay
+> original es de [smoovplay/smoovplay](https://github.com/smoovplay/smoovplay); todo el mérito del programa es suyo.
+>
+> **Qué cambia respecto al oficial:**
+> - **Hz automáticos en pantalla completa:** el monitor pasa a una frecuencia que encaja con los fps (120 Hz para
+>   60 fps en un monitor de 144 Hz), así cada fotograma dura lo mismo. Al salir de pantalla completa o cerrar,
+>   vuelve a la suya. Se quita en el menú (M) → Display → Match refresh rate.
+> - **Menos retraso acumulado:** si SmoovPlay se va quedando atrás, se salta algún fotograma intermedio en vez de
+>   ir cada vez más tarde.
+> - **Comprobación de fotograma nuevo o repetido 2,6 veces más rápida** en el procesador (ayuda sobre todo en AMD).
+> - **Steady HUD en AMD e Intel (DirectML):** los subtítulos y el HUD se quedan quietos en vez de deformarse.
+> - **Arreglo para capturadoras con RIFE en NVIDIA:** la imagen no arrancaba (error de CUDA al empezar). Aún sin
+>   probar en una NVIDIA real.
+> - **El registro de cada sesión apunta todos los ajustes**, para poder ver cómo jugó cada uno.
+>
+> **Cómo instalarlo:**
+> 1. Instala el SmoovPlay oficial **0.3.13** ([SmoovPlay-Setup.exe](https://github.com/smoovplay/smoovplay/releases/tag/v0.3.13)),
+>    ábrelo una vez y deja que termine de prepararse.
+> 2. Cierra SmoovPlay.
+> 3. Descarga **SmoovPlay-YisusPatch.zip** de las [releases de este fork](https://github.com/YisusOnDev/smoovplay/releases/latest),
+>    descomprímelo y haz doble clic en `instalar.bat`. Guarda una copia de lo que cambia.
+> 4. Para quitarlo: `deshacer.bat`. Si SmoovPlay se actualiza solo, vuelve a ser el oficial.
+>
+> El código de estas mejoras está en la rama `main` de este fork. Lo demás de esta página es el README original.
+
 <p align="center">
   <a href="https://smoovplay.github.io/compare/"><img src="https://smoovplay.github.io/compare/media/poster60.jpg" width="880" alt="A 30 fps PS5 Remote Play stream left of a dividing line and SmoovPlay's output right of it. Opens the comparison page."></a><br>
   <a href="https://smoovplay.github.io/compare/"><b>▶ See six clips at full frame rate</b></a>: split, side by side, or flip between the 30 fps stream
