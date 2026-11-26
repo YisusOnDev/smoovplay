@@ -31,9 +31,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-VERSION = "0.3.13"  # a pre-release sorts before its release: 0.1.0-beta.2 and 0.1.0 both show as updates
+VERSION = "0.3.13-yisus.1"  # a pre-release sorts before its release: 0.1.0-beta.2 and 0.1.0 both show as updates
 # "owner/name" of the GitHub repo whose releases the launcher checks for updates; empty turns the check off
-RELEASES_REPO = "smoovplay/smoovplay"
+RELEASES_REPO = "YisusOnDev/smoovplay"  # this fork (the original: smoovplay/smoovplay)
 SIGNING_KEY = Path(os.environ.get("SMOOVPLAY_SIGNING_KEY") or Path.home() / ".smoovplay" / "update-signing-key.xml")
 PYTHON_VERSION = "3.12.10"
 PYTHON_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
@@ -48,7 +48,8 @@ ROOT = HERE.parent
 BUILD = HERE / "build"
 DIST = HERE / "dist"
 CACHE = HERE / ".cache"
-CSC_CANDIDATES = [
+CSC_CANDIDATES = [Path(os.environ["SMOOVPLAY_CSC"])] if os.environ.get("SMOOVPLAY_CSC") else []  # e.g. NuGet's
+CSC_CANDIDATES += [  # Microsoft.Net.Compilers.Toolset, tasks/net472/csc.exe: no Visual Studio needed
     Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe"),
     Path(r"C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe"),
     Path(r"C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\Roslyn\csc.exe"),
