@@ -15,6 +15,7 @@ from .cadence import Action, CadenceScheduler, CutDetector, DipWatch, DuplicateD
 from .hdr import level8, to_u8
 from .interpolator import STEADY_HUD_THRESHOLD, RifeInterpolator
 from .io import TICK, MiniText, Waiting
+from .vcam import StreamClock
 
 
 # --score's "still areas": pixels within this many levels (of 255) in both real frames, like a HUD or map.
@@ -417,6 +418,10 @@ class Pipeline:
         was_late = False  # the last new frame was over CATCH_UP_MS behind
         gap = 0.95 / hz  # time between two presents, 5% short so the schedule has slack to catch up
         next_due = 0.0
+        # Each tick's even time (framegen/vcam.py StreamClock): a sink that takes it (SmoovPlay Camera) gets every
+        # frame with its ideal time, the tick's plus the frame's place within it at 90 and 120 fps (present's `at`)
+        clock, tick_at = StreamClock(), 0.0
+        ideal_out = bool(getattr(sink, "takes_ideal", False))
         cuts = CutDetector(self.cut_threshold)
         slot = 0
         key_frame: np.ndarray | None = None  # last frame that arrived as new content
@@ -527,6 +532,7 @@ class Pipeline:
             self.beat = time.perf_counter()
             if isinstance(tick, Waiting):  # no frame for a moment: keep the window answering until one comes
                 self.waiting = tick
+                clock.reset()
                 if sink is not None and hasattr(sink, "wait"):
                     cmd = sink.wait(tick)
                     if cmd in ("quit", "restart"):
@@ -567,6 +573,7 @@ class Pipeline:
                         print("[pipeline] steady HUD isn't available with this engine")
             t0 = time.perf_counter()
             st.queue_ms.append((t0 - tick.t_arrival) * 1000)
+            tick_at = clock.tick(tick.t_arrival, tick.extra.get("seq"))
             if torch.is_tensor(tick.frame):  # already on the GPU (hardware decoder)
                 it.load(tick.frame)
             else:
@@ -648,6 +655,7 @@ class Pipeline:
             to_score = None
             early_cmd = None  # 90/120 Hz: the first of this tick's two frames, already shown
             mid_t = 0.5  # the generated frame this tick ends on
+            main_at = 0.0  # the tick's main frame's ideal time, in ticks from the tick's (present's `at`)
             # Behind = waiting frames, not decode time: a Remote Play frame's arrival is before its ~3-11 ms decode.
             t_avail = tick.t_arrival if tick.t_ready is None else tick.t_ready
             behind = (t0 - t_avail) * 1000 >= behind_ms
@@ -661,16 +669,17 @@ class Pipeline:
                 was_late = late and not catch_up
             extra_ok = hz > 60 and sink is not None and not behind
 
-            def present(frame, text: str):
+            def present(frame, text: str, at: float = 0.0):
                 # Frame pacer: each present is due one gap after the previous one was *due*, so sleep overshoot and
                 # present time don't accumulate; when late it goes straight away and the schedule restarts from now.
+                # at: the frame's ideal time, in ticks from this tick's (the even beat the camera delivers on).
                 nonlocal next_due
                 if hz > 60:
                     now = time.perf_counter()
                     if next_due > now:
                         time.sleep(next_due - now)
                     next_due = max(next_due, now) + gap
-                cmd = sink.write(frame, text)
+                cmd = (sink.write(frame, text, ideal=tick_at + at * TICK) if ideal_out else sink.write(frame, text))
                 t_now = time.perf_counter()
                 shown_rate.add(t_now)
                 if replay is not None:
@@ -682,7 +691,9 @@ class Pipeline:
                 if not extra_ok:
                     st.quarter_skipped += 1
                     return False
-                early_cmd = present(self._generated(it.interpolate(slot, t), gpu_out), ov_text)
+                # 120: 1/4 or 3/4 half a tick before the tick's main frame; 90: 1/3 two thirds of one before 2/3
+                early_cmd = present(self._generated(it.interpolate(slot, t), gpu_out), ov_text,
+                                    at=-0.5 if hz == 120 else -2 / 3)
                 st.quarter_shown += 1
                 return True
 
@@ -755,12 +766,16 @@ class Pipeline:
                             frame = self._generated(it.interpolate(slot, pl.t), gpu_out)
                         st.uneven_waits += pl.waiting
                         if k < len(phases) - 1:
-                            early_cmd = present(frame, ov_text) or early_cmd
+                            early_cmd = present(frame, ov_text, at=phi - phases[-1]) or early_cmd
                             t_now = time.perf_counter()
                             st.real_delay_ms.extend((t_now - f.t_arrival) * 1000 for f in pl.reached)
                         else:
                             out, reached = frame, pl.reached
                             action = Action.INTERP if pl.b is not None else Action.CURRENT
+                # 90 fps: the repeat tick's B comes a third of a tick before its tick's time (1/3, 2/3, B evenly)
+                main_at = -1 / 3 if hz == 90 and quarter_due and not timed and action is not Action.INTERP else 0.0
+                if timed:
+                    pass
                 elif hz == 120 and action is Action.INTERP:
                     show_early(0.25)
                 elif hz == 120 and quarter_due and action is Action.CURRENT and not is_new:
@@ -836,7 +851,7 @@ class Pipeline:
                             if hasattr(sink, "toast"):
                                 sink.toast(advice, 8.0)
                     ov_text, ov_next = overlay_text(), t_ready + 0.25
-                cmd = present(out, ov_text) or early_cmd
+                cmd = present(out, ov_text, at=main_at) or early_cmd
             t_shown = time.perf_counter()
             st.busy_ms.append((t_shown - t0) * 1000)
             if sink is not None:

@@ -1,0 +1,3 @@
+Microsoft DirectShow base classes, from https://github.com/microsoft/Windows-classic-samples
+(Samples/Win7Samples/multimedia/directshow/baseclasses, commit 434f6002bdf9cf9829406c3ff2b33387982d6168),
+unchanged. MIT licence: LICENSE in this folder.

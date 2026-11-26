@@ -1632,11 +1632,14 @@ class MultiSink:
         self.sinks = [s for s in sinks if s is not None]
         # Hand out CUDA tensors if any sink can use them directly; the others copy to the CPU themselves.
         self.gpu = any(getattr(s, "gpu", False) for s in self.sinks)
+        # A sink with takes_ideal (SmoovPlay Camera, framegen/vcam.py) also gets each frame's ideal time
+        self.takes_ideal = any(getattr(s, "takes_ideal", False) for s in self.sinks)
 
-    def write(self, frame, text: str | None = None):
+    def write(self, frame, text: str | None = None, ideal: float | None = None):
         cmd = None
         for s in self.sinks:
-            cmd = s.write(frame, text) or cmd
+            cmd = (s.write(frame, text, ideal=ideal) if getattr(s, "takes_ideal", False)
+                   else s.write(frame, text)) or cmd
         return cmd
 
     def wait(self, w: Waiting) -> str | None:

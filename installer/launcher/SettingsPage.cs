@@ -103,7 +103,7 @@ namespace SmoovPlay
         static readonly Dictionary<string, string> GroupIcons = new Dictionary<string, string>
         {
             { "Smoothness", "\uEC4A" }, { "Picture", "\uE7B3" }, { "Display", "\uE7F4" }, { "Instant replay", "\uE714" },
-            { "Looks", "\uE790" }, { "PS5 Remote Play", "\uE7FC" },
+            { "Looks", "\uE790" }, { "PS5 Remote Play", "\uE7FC" }, { "Streaming", "\uE8B8" },
         };
         List<SettingSpec> settingSpecs;
         string settingsError;

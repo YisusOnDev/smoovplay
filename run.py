@@ -68,6 +68,7 @@ from framegen.interpolator import MODELS, RifeInterpolator
 from framegen.io import (TICK, CaptureSource, FileSink, FileSource, GLWindowSink, MultiSink, Ps5SimSource,
                          WindowSink)
 from framegen.pipeline import Pipeline
+from framegen.vcam import CameraSink
 from framegen.settings import BY_KEY, DEFAULT_PATH, SPECS, Settings, log_line, log_value
 from framegen.sources import TestMode, make_detector
 from framegen.vfg import vfg_unavailable
@@ -648,7 +649,9 @@ def main() -> int:
         cfg, interp = build_or_rife(session_config())  # with 8-bit frames
     if kind == "chiaki" and hasattr(src, "set_hdr"):
         src.set_hdr(hdr_out, hdr_peak if hdr10[0] else None, why=hdr_why)
-    sink = MultiSink(window, FileSink(a.out, src.w, src.h) if a.out else None)
+    # SmoovPlay Camera (framegen/vcam.py): the frames for OBS, while its setting is on and OBS reads it
+    camera = CameraSink(settings) if sys.platform == "win32" and isinstance(window, GLWindowSink) else None
+    sink = MultiSink(window, FileSink(a.out, src.w, src.h) if a.out else None, camera)
     settings.watch(model_rows)  # before Remote's own watcher, so what it publishes is already up to date
     model_rows()
     remote = None

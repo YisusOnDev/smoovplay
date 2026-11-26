@@ -144,7 +144,8 @@ def test_menu_navigation_changes_settings():
 def test_the_main_page_has_the_quick_picks_and_a_row_for_each_section():
     m = Menu(Settings())
     assert _keys(m) == ["interp", "hz", "scaler", "section:Smoothness", "section:Picture", "section:Looks",
-                        "section:Display", "section:Instant replay", "section:PS5 Remote Play"]
+                        "section:Display", "section:Instant replay", "section:PS5 Remote Play",
+                        "section:Streaming"]
 
 
 def test_sections_open_and_go_back_where_the_player_was():
