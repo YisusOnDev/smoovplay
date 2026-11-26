@@ -50,6 +50,9 @@
 >   probar en una NVIDIA real.
 > - **El registro de cada sesión apunta todos los ajustes** y cada cambio mientras juegas, para poder ver cómo
 >   jugó cada uno.
+> - **Arreglos que otros han propuesto al original y aún no están en él:** el sonido de la capturadora ya no se va
+>   retrasando durante la sesión (Elgato HD60 X), activar la interpolación mientras el juego baja de 30 fps ya no
+>   cierra la sesión, y guardar dos repeticiones en el mismo segundo ya no estropea una.
 > - También trae lo último del original que aún no ha salido en su release (lo de Linux y macOS, que en Windows
 >   no cambia nada).
 >
