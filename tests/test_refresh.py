@@ -109,3 +109,19 @@ def test_leaves_the_shared_user32_that_window_py_uses_alone():
     refresh.rates(window.monitor_of(hwnd)[1])
     assert ctypes.windll.user32.EnumDisplaySettingsW.argtypes == before
     window.monitor_of(hwnd)  # still works
+
+
+def test_an_output_no_rate_fits_goes_back_to_the_desktops_own(monkeypatch):
+    # A user's session: 60 fps switched 144 -> 120 Hz, then 90 fps stayed at 120, where 144 waits less per refresh
+    u32, now = _User32(), {"hz": 144}
+    monkeypatch.setattr(refresh.sys, "platform", "win32")
+    monkeypatch.setattr(refresh, "_u32", lambda: u32)
+    monkeypatch.setattr(refresh, "rates", lambda device: (2560, 1440, now["hz"], [60, 120, 144]))
+    m = RefreshMatch()
+    assert "144 Hz -> 120 Hz" in m.match("D", 60)
+    now["hz"] = 120
+    assert m.match("D", 120) == ""  # 120 already fits
+    assert "back to 144 Hz" in m.match("D", 90)
+    assert u32.calls[-1] == ("D", None, 0)
+    now["hz"] = 144
+    assert "144 Hz -> 120 Hz" in m.match("D", 60)  # and to 120 again for 60

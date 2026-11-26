@@ -102,8 +102,13 @@ class RefreshMatch:
         if info is None:
             return ""
         w, h, current, available = info
-        want = pick(out_hz, current, available)
+        # Weighed against the desktop's own rate, not the one we switched to: from 120 Hz (for 60 fps), 90 fps fits
+        # neither 120 nor 144, and the desktop's own 144 waits less for each refresh, so it goes back to that
+        own = self.was if self.device == device else current
+        want = pick(out_hz, own, available)
         if want is None:
+            return self.restore()
+        if want == current:
             return ""
         dm = _DEVMODE()
         dm.dmSize = ctypes.sizeof(dm)
