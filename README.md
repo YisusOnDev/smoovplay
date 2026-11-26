@@ -29,31 +29,45 @@
 </p>
 
 > [!NOTE]
-> **Este es el fork de YisusOnDev, no el SmoovPlay oficial.** Es SmoovPlay 0.3.13 con unas mejoras que hemos
-> probado jugando, en un PC con AMD Radeon RX 9070 XT y en otro con NVIDIA RTX 4090 y capturadora. El SmoovPlay
-> original es de [smoovplay/smoovplay](https://github.com/smoovplay/smoovplay); todo el mérito del programa es suyo.
+> **Este es el fork de YisusOnDev, no el SmoovPlay oficial.** Es SmoovPlay con mejoras que hemos probado jugando,
+> en un PC con AMD Radeon RX 9070 XT (PS5 Remote Play) y en otro con NVIDIA RTX 4090 y capturadora Elgato HD60 X.
+> El programa es de [smoovplay/smoovplay](https://github.com/smoovplay/smoovplay), con licencia MIT; todo el mérito
+> del original es suyo. Este fork se irá actualizando con lo nuevo del original y con nuestras mejoras.
+>
+> ### ⬇ [Descargar SmoovPlay-Setup.exe (versión de este fork)](https://github.com/YisusOnDev/smoovplay/releases/latest)
+>
+> Se instala igual que el oficial: descárgalo, ábrelo y sigue los pasos.
 >
 > **Qué cambia respecto al oficial:**
 > - **Hz automáticos en pantalla completa:** el monitor pasa a una frecuencia que encaja con los fps (120 Hz para
->   60 fps en un monitor de 144 Hz), así cada fotograma dura lo mismo. Al salir de pantalla completa o cerrar,
->   vuelve a la suya. Se quita en el menú (M) → Display → Match refresh rate.
+>   60 fps en un monitor de 144 Hz), así cada fotograma dura lo mismo. Vuelve a la suya al salir de pantalla
+>   completa, al cerrar o si los fps no encajan (90). Se quita en el menú (M) → Display → Match refresh rate.
 > - **Menos retraso acumulado:** si SmoovPlay se va quedando atrás, se salta algún fotograma intermedio en vez de
 >   ir cada vez más tarde.
 > - **Comprobación de fotograma nuevo o repetido 2,6 veces más rápida** en el procesador (ayuda sobre todo en AMD).
 > - **Steady HUD en AMD e Intel (DirectML):** los subtítulos y el HUD se quedan quietos en vez de deformarse.
-> - **Arreglo para capturadoras con RIFE en NVIDIA:** la imagen no arrancaba (error de CUDA al empezar). Aún sin
+> - **Capturadora + RIFE en NVIDIA:** la imagen no arrancaba por un error de CUDA al empezar. Arreglado, aún sin
 >   probar en una NVIDIA real.
-> - **El registro de cada sesión apunta todos los ajustes**, para poder ver cómo jugó cada uno.
+> - **El registro de cada sesión apunta todos los ajustes** y cada cambio mientras juegas, para poder ver cómo
+>   jugó cada uno.
+> - También trae lo último del original que aún no ha salido en su release (lo de Linux y macOS, que en Windows
+>   no cambia nada).
 >
-> **Cómo instalarlo:**
-> 1. Instala el SmoovPlay oficial **0.3.13** ([SmoovPlay-Setup.exe](https://github.com/smoovplay/smoovplay/releases/tag/v0.3.13)),
->    ábrelo una vez y deja que termine de prepararse.
-> 2. Cierra SmoovPlay.
-> 3. Descarga **SmoovPlay-YisusPatch.zip** de las [releases de este fork](https://github.com/YisusOnDev/smoovplay/releases/latest),
->    descomprímelo y haz doble clic en `instalar.bat`. Guarda una copia de lo que cambia.
-> 4. Para quitarlo: `deshacer.bat`. Si SmoovPlay se actualiza solo, vuelve a ser el oficial.
+> **Avisos (léelos):**
+> - **No es oficial.** Si algo falla con esta versión, avisa aquí ([issues](https://github.com/YisusOnDev/smoovplay/issues)),
+>   no a los autores del original. El botón *Send feedback* del programa ya abre los issues de este fork.
+> - **Windows avisará** con "Windows protegió tu PC" (SmartScreen), igual que con el oficial: no está firmado con
+>   certificado. Pulsa *Más información* → *Ejecutar de todas formas*. Para comprobar que el archivo es el bueno,
+>   su SHA-256 viene en la release.
+> - **Las actualizaciones vienen de este fork**, no del oficial. El programa avisa cuando hay una versión nueva aquí
+>   y se actualiza con un clic; cada actualización va firmada y el programa comprueba la firma antes de instalarla.
+> - **Si ya tienes el oficial instalado**, este se instala encima, en la misma carpeta, y desde entonces se
+>   actualiza desde aquí. Tus ajustes se quedan (están en `%APPDATA%\framegen`). Para volver al oficial, instala su
+>   [SmoovPlay-Setup.exe](https://github.com/smoovplay/smoovplay/releases/latest) encima.
+> - **chiaki-ng** (el programa de Remote Play que va dentro) es exactamente el mismo que en el oficial 0.3.13, con su
+>   código fuente y licencia (AGPL) dentro de la instalación, en `chiaki\source`.
 >
-> El código de estas mejoras está en la rama `main` de este fork. Lo demás de esta página es el README original.
+> Lo demás de esta página es el README original: sus enlaces de descarga llevan al SmoovPlay oficial.
 
 <p align="center">
   <a href="https://smoovplay.github.io/compare/"><img src="https://smoovplay.github.io/compare/media/poster60.jpg" width="880" alt="A 30 fps PS5 Remote Play stream left of a dividing line and SmoovPlay's output right of it. Opens the comparison page."></a><br>
