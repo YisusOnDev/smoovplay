@@ -278,6 +278,17 @@ SPECS: tuple[Spec, ...] = (
               "comes back when you leave fullscreen or close SmoovPlay.",
          impact={"picture": "No 2-3-2 refresh beat.",
                  "speed": "The screen goes black for a second when it switches."}),
+    # framegen/pipeline.py Pipeline.run's `held`. A 52-minute session on DirectML (a 15 ms model) had the in-between
+    # frame up for 5.5 ms and the real one for 27.7 ms: the real frame went out on its repeat tick, just after the
+    # late in-between one. Off by default: it shows each real frame later.
+    Spec("even_60", "Even 60 fps", (False, True), False, ON_OFF, group="Display",
+         applies=("interp", (True,)),
+         help="At 60 fps, when the AI frame takes most of a frame to make, it's ready late and the real frame "
+              "follows a few ms after it: the AI frame only flashes, and motion looks close to 30 fps. On holds each "
+              "real frame back to about a frame after the AI one, so both stay up as long. It costs delay: about "
+              "12 ms more for each real frame. A PC fast enough not to need it is left as it is.",
+         impact={"picture": "Every frame up for the same time at 60 fps, not a flash and a long frame.",
+                 "speed": "About 12 ms more delay for each real frame."}),
     # framegen/dxgi_present.py. Standard stays the default until Low delay has been measured on more PCs.
     Spec("present", "Window presentation", ("gl", "dxgi"), "gl", {"gl": "Standard", "dxgi": "Low delay (Experimental)"},
          live=False, group="Display", applies=("fullscreen", (False,)),

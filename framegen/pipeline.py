@@ -175,6 +175,10 @@ class Stats:
     quarter_skipped: int = 0  # ones skipped because the pipeline was behind (shown at 60 Hz instead)
     behind: int = 0  # ticks whose frame waited for the pipeline to finish earlier ones (more than 60% of a tick)
     caught_up: int = 0  # in-between frames left out to catch up, the game's frames running behind (CATCH_UP_MS)
+    # Even 60 fps: real frames held back from their repeat tick, and for each how long after the in-between frame
+    # before it it went out (about 16.7 ms is even)
+    even_held: int = 0
+    even_gap_ms: list = field(default_factory=list)
     hz_used: set = field(default_factory=set)  # output rates used during the run
     simulated: int = 0  # ticks played with "Simulate a 30 fps game" on
     # Frames played in test mode, by the source's word on whether the game itself drew each one new or repeated one.
@@ -259,6 +263,10 @@ class Stats:
         if self.caught_up:
             lines.append(f"in-between frames left out to catch up (two new frames in a row over "
                          f"{CATCH_UP_MS:.0f} ms behind): {self.caught_up}")
+        if self.even_held:
+            gaps = self.even_gap_ms
+            lines.append(f"even 60 fps: {self.even_held} real frames held back, shown {pct(gaps, 50):.1f} ms after the "
+                         f"in-between frame (p50; p5 {pct(gaps, 5):.1f}, p95 {pct(gaps, 95):.1f})")
         if self.quarter_shown or self.quarter_skipped:
             due = self.quarter_shown + self.quarter_skipped
             lines.append(f"extra in-between frames (90/120 Hz) shown {self.quarter_shown} of {due} "
@@ -417,6 +425,16 @@ class Pipeline:
         was_late = False  # the last new frame was over CATCH_UP_MS behind
         gap = 0.95 / hz  # time between two presents, 5% short so the schedule has slack to catch up
         next_due = 0.0
+        # Even 60 fps (settings.even_60). A slow model makes the in-between frame late, and the real frame then goes out
+        # on its repeat tick a few ms after it, so the in-between frame only flashes. Waiting for the right moment
+        # would block the next tick (a sleep before the present, with VSync's blocking swap, once ran the queue up to
+        # seconds), so the real frame is held instead: it goes out at the start of the next in-between frame's model
+        # call, the first moment the loop is free about one tick after the in-between frame. held: (frame, overlay
+        # text, the real frame's arrival) while it waits; held_cmd: the sink's command from showing it, handed on
+        # with the tick's own. mid_at: when the last tick's in-between frame went out, else None; mid_span: how long
+        # that took from the model starting, which is about when a held frame would go out before the next one.
+        held, held_cmd = None, None
+        mid_at, mid_span = None, 0.0
         cuts = CutDetector(self.cut_threshold)
         slot = 0
         key_frame: np.ndarray | None = None  # last frame that arrived as new content
@@ -460,6 +478,28 @@ class Pipeline:
         # on (then a 30 fps stretch is a cutscene, not the game), and since when it has been at about 30
         test_at_60, at30_since = False, None
         last_new_at = None  # when the last new frame arrived (Stats.new_gaps_ms)
+
+        def show(frame, text: str):
+            cmd = sink.write(frame, text)
+            t_now = time.perf_counter()
+            shown_rate.add(t_now)
+            if replay is not None:
+                replay.frame(frame, t_now)  # after it's on screen, so it adds no delay
+            return cmd
+
+        def flush() -> None:
+            """Even 60 fps: the held real frame on screen now, before anything else is."""
+            nonlocal held, held_cmd
+            if held is None:
+                return
+            frame, text, arrival = held
+            held = None
+            held_cmd = show(frame, text) or held_cmd
+            t_now = time.perf_counter()
+            st.real_delay_ms.append((t_now - arrival) * 1000)
+            st.even_held += 1
+            if mid_at is not None:
+                st.even_gap_ms.append((t_now - mid_at) * 1000)
 
         def test_line() -> str:
             """Test mode's badge, and quality over the last ~30 scored frames (about a second). 90 fps draws frames
@@ -527,6 +567,11 @@ class Pipeline:
             self.beat = time.perf_counter()
             if isinstance(tick, Waiting):  # no frame for a moment: keep the window answering until one comes
                 self.waiting = tick
+                if held is not None:  # (Even 60 fps: no next frame to show it before)
+                    flush()
+                    if held_cmd in ("quit", "restart"):
+                        st.exit = held_cmd
+                        break
                 if sink is not None and hasattr(sink, "wait"):
                     cmd = sink.wait(tick)
                     if cmd in ("quit", "restart"):
@@ -646,6 +691,7 @@ class Pipeline:
 
             to_score = None
             early_cmd = None  # 90/120 Hz: the first of this tick's two frames, already shown
+            t_model = None  # when this tick's in-between frame started being made
             mid_t = 0.5  # the generated frame this tick ends on
             # Behind = waiting frames, not decode time: a Remote Play frame's arrival is before its ~3-11 ms decode.
             t_avail = tick.t_arrival if tick.t_ready is None else tick.t_ready
@@ -664,17 +710,13 @@ class Pipeline:
                 # Frame pacer: each present is due one gap after the previous one was *due*, so sleep overshoot and
                 # present time don't accumulate; when late it goes straight away and the schedule restarts from now.
                 nonlocal next_due
+                flush()  # (Even 60 fps: a held frame goes first, whatever comes next)
                 if hz > 60:
                     now = time.perf_counter()
                     if next_due > now:
                         time.sleep(next_due - now)
                     next_due = max(next_due, now) + gap
-                cmd = sink.write(frame, text)
-                t_now = time.perf_counter()
-                shown_rate.add(t_now)
-                if replay is not None:
-                    replay.frame(frame, t_now)  # after it's on screen, so it adds no delay
-                return cmd
+                return show(frame, text)
 
             def show_early(t: float) -> bool:
                 nonlocal early_cmd
@@ -767,10 +809,12 @@ class Pipeline:
                 if timed:
                     pass  # shown above
                 elif action is Action.INTERP and catch_up and early_cmd is None:
+                    held = None  # (Even 60 fps: the held frame would only flash before this newer one)
                     out, action = tick.frame, Action.CURRENT  # shown at once (and again next tick, as a repeat)
                     quarter_due = False  # (120 Hz: no 3/4 frame after it either)
                     st.caught_up += 1
                 elif action is Action.INTERP:
+                    flush()  # Even 60 fps: the held real frame, about one tick after the last in-between frame
                     t_model = time.perf_counter()
                     out = self._generated(it.interpolate(slot, mid_t), gpu_out)
                     st.model_ms.append((time.perf_counter() - t_model) * 1000)
@@ -800,7 +844,7 @@ class Pipeline:
             if on_tick is not None:
                 on_tick(tick, diff, action, last_proc, t0)
 
-            cmd = None
+            cmd, holding = None, False
             if sink is not None:
                 if t_ready >= ov_next:
                     test = settings is not None and settings.simulate_30
@@ -832,11 +876,26 @@ class Pipeline:
                             if hasattr(sink, "toast"):
                                 sink.toast(advice, 8.0)
                     ov_text, ov_next = overlay_text(), t_ready + 0.25
-                cmd = present(out, ov_text) or early_cmd
+                # Even 60 fps: the real frame's repeat tick, straight after its in-between frame, holds it for the
+                # start of the next model call (see `held`), when that comes closer to one tick after the in-between
+                # frame than now does. A fast model leaves the model call too soon after the frames arrive, and
+                # then the frame goes now, as without the setting. Not when the last new frame was late: catch-up may
+                # be about to leave out the next in-between frame, and the held frame would only flash before it.
+                holding = bool(settings is not None and getattr(settings, "even_60", False) and hz == 60 and enabled
+                               and not timed and gt_fn is None and mid_at is not None and unshown is not None
+                               and not is_new and action is Action.CURRENT and not was_late and early_cmd is None
+                               and abs(mid_span - TICK) < abs(time.perf_counter() - mid_at - TICK))
+                if holding:
+                    held, unshown = (out, ov_text, unshown), None
+                else:
+                    cmd = present(out, ov_text) or early_cmd
+                cmd, held_cmd = cmd or held_cmd, None
             t_shown = time.perf_counter()
             st.busy_ms.append((t_shown - t0) * 1000)
-            if sink is not None:
+            if sink is not None and not holding:  # (a held frame is shown in a later tick)
                 st.sink_ms.append((t_shown - t_ready) * 1000)
+                interp_out = action is Action.INTERP and not timed and t_model is not None
+                mid_at, mid_span = (t_shown, t_shown - t_model) if interp_out else (None, mid_span)
 
             # Track when each real frame first reaches the screen (timed: when the game time shown reaches it).
             if timed:
@@ -890,6 +949,8 @@ class Pipeline:
                         sched = CadenceScheduler()
                         print(f"[pipeline] interpolation {'ON' if enabled else 'OFF'}")
 
+        if st.exit == "end" and held is not None:  # the source has ended: its last real frame still goes out
+            flush()
         st.wall_s = time.perf_counter() - t_start
         return st
 
