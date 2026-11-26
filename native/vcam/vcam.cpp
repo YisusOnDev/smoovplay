@@ -1,7 +1,7 @@
 // SmoovPlay Camera: a DirectShow video source ("Video Capture Device" in OBS) fed by SmoovPlay's pipeline.
 //
 // The pipeline (framegen/vcam.py) writes every frame it shows, with its ideal time, into the shared memory
-// "Local\smoovplay-camera" (the layout is in vcam.py's docstring). This filter delivers RGB32 at 60 fps on its own
+// "Local\smoovplay-camera" (the layout is in vcam.py's docstring). This filter delivers RGB32 (or NV12) at 60 fps on its own
 // even beat: on each output tick t it takes the newest frame whose ideal time + D is due (D: the header's delay_ms),
 // so the frames go out as evenly as their ideal times, however unevenly SmoovPlay's window showed them. No frame due
 // yet: the last one again (counted). SmoovPlay not running: black.
@@ -41,6 +41,11 @@ const REFERENCE_TIME kFrameTime = 10000000 / kFps;
 struct Size { int w, h; };
 const Size kSizes[] = {{1920, 1080}, {2560, 1440}, {1280, 720}};
 const int kNumSizes = 3;
+// Each size as RGB32 (the default: OBS takes it as it is) and NV12 (Discord's video engine takes only YUV formats)
+enum Fmt { kRGB32 = 0, kNV12 = 1 };
+const int kNumFmts = 2;
+const int kNumTypes = kNumSizes * kNumFmts;
+DEFINE_GUID(SPVC_MEDIASUBTYPE_NV12, 0x3231564E, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71);
 
 template <typename T> T Load(const uint8_t* p) { return *reinterpret_cast<const volatile T*>(p); }
 template <typename T> void Store(uint8_t* p, T v) { *reinterpret_cast<volatile T*>(p) = v; }
@@ -121,62 +126,110 @@ private:
     uint8_t* base_ = nullptr;
 };
 
-void MakeType(CMediaType* mt, int w, int h) {
+int Bits(Fmt f) { return f == kNV12 ? 12 : 32; }
+
+void MakeType(CMediaType* mt, int w, int h, Fmt f = kRGB32) {
     mt->InitMediaType();
     VIDEOINFOHEADER* vih = reinterpret_cast<VIDEOINFOHEADER*>(mt->AllocFormatBuffer(sizeof(VIDEOINFOHEADER)));
     ZeroMemory(vih, sizeof(VIDEOINFOHEADER));
     vih->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     vih->bmiHeader.biWidth = w;
-    vih->bmiHeader.biHeight = h;  // positive: rows bottom to top, as RGB DIBs are
+    vih->bmiHeader.biHeight = h;  // positive: RGB rows bottom to top, as RGB DIBs are (YUV is top down anyway)
     vih->bmiHeader.biPlanes = 1;
-    vih->bmiHeader.biBitCount = 32;
-    vih->bmiHeader.biCompression = BI_RGB;
-    vih->bmiHeader.biSizeImage = (DWORD)w * h * 4;
+    vih->bmiHeader.biBitCount = (WORD)Bits(f);
+    vih->bmiHeader.biCompression = f == kNV12 ? MAKEFOURCC('N', 'V', '1', '2') : BI_RGB;
+    vih->bmiHeader.biSizeImage = (DWORD)((int64_t)w * h * Bits(f) / 8);
     vih->AvgTimePerFrame = kFrameTime;
-    vih->dwBitRate = (DWORD)((uint64_t)w * h * 32 * kFps);
+    vih->dwBitRate = (DWORD)((uint64_t)w * h * Bits(f) * kFps);
     mt->SetType(&MEDIATYPE_Video);
-    mt->SetSubtype(&MEDIASUBTYPE_RGB32);
+    mt->SetSubtype(f == kNV12 ? &SPVC_MEDIASUBTYPE_NV12 : &MEDIASUBTYPE_RGB32);
     mt->SetFormatType(&FORMAT_VideoInfo);
     mt->SetTemporalCompression(FALSE);
     mt->SetSampleSize(vih->bmiHeader.biSizeImage);
 }
 
-bool SizeOf(const AM_MEDIA_TYPE* mt, int* w, int* h) {
-    if (!mt || mt->majortype != MEDIATYPE_Video || mt->subtype != MEDIASUBTYPE_RGB32 ||
-        mt->formattype != FORMAT_VideoInfo || mt->cbFormat < sizeof(VIDEOINFOHEADER) || !mt->pbFormat)
+// One of our types: its size and format
+bool TypeOf(const AM_MEDIA_TYPE* mt, int* w, int* h, Fmt* f) {
+    if (!mt || mt->majortype != MEDIATYPE_Video || mt->formattype != FORMAT_VideoInfo ||
+        mt->cbFormat < sizeof(VIDEOINFOHEADER) || !mt->pbFormat)
         return false;
     const VIDEOINFOHEADER* vih = reinterpret_cast<const VIDEOINFOHEADER*>(mt->pbFormat);
-    if (vih->bmiHeader.biBitCount != 32 || vih->bmiHeader.biCompression != BI_RGB) return false;
+    if (mt->subtype == MEDIASUBTYPE_RGB32 && vih->bmiHeader.biBitCount == 32 &&
+        vih->bmiHeader.biCompression == BI_RGB && vih->bmiHeader.biHeight > 0)
+        *f = kRGB32;
+    else if (mt->subtype == SPVC_MEDIASUBTYPE_NV12 && vih->bmiHeader.biCompression == MAKEFOURCC('N', 'V', '1', '2'))
+        *f = kNV12;
+    else
+        return false;
+    int hh = vih->bmiHeader.biHeight < 0 ? -vih->bmiHeader.biHeight : vih->bmiHeader.biHeight;
     for (int i = 0; i < kNumSizes; i++)
-        if (vih->bmiHeader.biWidth == kSizes[i].w && vih->bmiHeader.biHeight == kSizes[i].h) {
+        if (vih->bmiHeader.biWidth == kSizes[i].w && hh == kSizes[i].h) {
             *w = kSizes[i].w; *h = kSizes[i].h;
             return true;
         }
     return false;
 }
 
-// BGR (rows top to bottom, sw x sh) into BGRX (rows bottom to top, dw x dh), scaled nearest-neighbour if the sizes
-// differ (OBS asked for another size than SmoovPlay's stream).
-void Convert(const uint8_t* src, int sw, int sh, uint8_t* dst, int dw, int dh, std::vector<int>* xmap) {
-    if (sw == dw && sh == dh) {
-        for (int y = 0; y < dh; y++) {
-            const uint8_t* s = src + (size_t)y * sw * 3;
-            uint32_t* d = reinterpret_cast<uint32_t*>(dst + (size_t)(dh - 1 - y) * dw * 4);
-            for (int x = 0; x < dw; x++, s += 3) d[x] = 0xff000000u | (s[2] << 16) | (s[1] << 8) | s[0];
+// Source columns for each output column, in bytes into a BGR row: nearest neighbour when OBS or Discord asked for
+// another size than SmoovPlay's stream
+struct XMap {
+    std::vector<int> x;
+    int sw = 0, dw = 0;
+    const int* For(int s, int d) {
+        if (s != sw || d != dw) {
+            sw = s; dw = d;
+            x.resize(d);
+            for (int i = 0; i < d; i++) x[i] = (int)((int64_t)i * s / d) * 3;
         }
-        return;
+        return x.data();
     }
-    if ((int)xmap->size() != dw) {
-        xmap->resize(dw);
-        for (int x = 0; x < dw; x++) (*xmap)[x] = (int)((int64_t)x * sw / dw) * 3;
-    }
+};
+
+// BGR (rows top to bottom, sw x sh) into BGRX (rows bottom to top, dw x dh)
+void ToRGB32(const uint8_t* src, int sw, int sh, uint8_t* dst, int dw, int dh, XMap* xm) {
+    const int* xs = xm->For(sw, dw);
     for (int y = 0; y < dh; y++) {
         const uint8_t* row = src + (size_t)((int64_t)y * sh / dh) * sw * 3;
         uint32_t* d = reinterpret_cast<uint32_t*>(dst + (size_t)(dh - 1 - y) * dw * 4);
         for (int x = 0; x < dw; x++) {
-            const uint8_t* s = row + (*xmap)[x];
-            d[x] = 0xff000000u | (s[2] << 16) | (s[1] << 8) | s[0];
+            const uint8_t* p = row + xs[x];
+            d[x] = 0xff000000u | (p[2] << 16) | (p[1] << 8) | p[0];
         }
+    }
+}
+
+// BGR into NV12 (a Y plane, then U and V interleaved at half size), BT.709 limited range as video is. Sizes are
+// even (kSizes).
+void ToNV12(const uint8_t* src, int sw, int sh, uint8_t* dst, int dw, int dh, XMap* xm) {
+    const int* xs = xm->For(sw, dw);
+    uint8_t* uv = dst + (size_t)dw * dh;
+    for (int y = 0; y < dh; y += 2) {
+        const uint8_t* r0 = src + (size_t)((int64_t)y * sh / dh) * sw * 3;
+        const uint8_t* r1 = src + (size_t)((int64_t)(y + 1) * sh / dh) * sw * 3;
+        uint8_t* y0 = dst + (size_t)y * dw;
+        uint8_t* y1 = y0 + dw;
+        uint8_t* c = uv + (size_t)(y / 2) * dw;
+        for (int x = 0; x < dw; x += 2) {
+            const uint8_t* p[4] = {r0 + xs[x], r0 + xs[x + 1], r1 + xs[x], r1 + xs[x + 1]};
+            uint8_t* out[4] = {y0 + x, y0 + x + 1, y1 + x, y1 + x + 1};
+            int sb = 0, sg = 0, sr = 0;
+            for (int k = 0; k < 4; k++) {
+                int b = p[k][0], g = p[k][1], r = p[k][2];
+                *out[k] = (uint8_t)(16 + ((47 * r + 157 * g + 16 * b + 128) >> 8));
+                sb += b; sg += g; sr += r;
+            }
+            c[x] = (uint8_t)(128 + ((-26 * sr - 87 * sg + 112 * sb + 512) >> 10));
+            c[x + 1] = (uint8_t)(128 + ((112 * sr - 102 * sg - 10 * sb + 512) >> 10));
+        }
+    }
+}
+
+void Black(uint8_t* dst, int w, int h, Fmt f) {
+    if (f == kNV12) {
+        memset(dst, 16, (size_t)w * h);
+        memset(dst + (size_t)w * h, 128, (size_t)w * h / 2);
+    } else {
+        memset(dst, 0, (size_t)w * h * 4);
     }
 }
 
@@ -190,7 +243,7 @@ public:
         if (ring_.Live(Qpc(), QpcFreq(), &sw, &sh, &delay))
             for (int i = 0; i < kNumSizes; i++)
                 if (kSizes[i].w == sw && kSizes[i].h == sh) { w = sw; h = sh; }
-        MakeType(&m_mt, w, h);
+        MakeType(&m_mt, w, h, kRGB32);
     }
 
     DECLARE_IUNKNOWN;
@@ -201,25 +254,28 @@ public:
         return CSourceStream::NonDelegatingQueryInterface(riid, ppv);
     }
 
-    // -- media types: RGB32 at 60 fps, in the sizes of kSizes (the current one first)
+    // -- media types: RGB32 and NV12 at 60 fps, in the sizes of kSizes (the current one first)
     HRESULT GetMediaType(int pos, CMediaType* mt) override {
         CAutoLock lock(m_pFilter->pStateLock());
         if (pos < 0) return E_INVALIDARG;
         if (pos == 0) { *mt = m_mt; return S_OK; }
-        if (pos > kNumSizes) return VFW_S_NO_MORE_ITEMS;
-        MakeType(mt, kSizes[pos - 1].w, kSizes[pos - 1].h);
+        if (pos > kNumTypes) return VFW_S_NO_MORE_ITEMS;
+        int i = (pos - 1) / kNumFmts;
+        MakeType(mt, kSizes[i].w, kSizes[i].h, (Fmt)((pos - 1) % kNumFmts));
         return S_OK;
     }
 
     HRESULT CheckMediaType(const CMediaType* mt) override {
         int w, h;
-        return SizeOf(mt, &w, &h) ? S_OK : E_INVALIDARG;
+        Fmt f;
+        return TypeOf(mt, &w, &h, &f) ? S_OK : E_INVALIDARG;
     }
 
     HRESULT SetMediaType(const CMediaType* mt) override {
         CAutoLock lock(m_pFilter->pStateLock());
         int w, h;
-        if (!SizeOf(mt, &w, &h)) return E_INVALIDARG;
+        Fmt f;
+        if (!TypeOf(mt, &w, &h, &f)) return E_INVALIDARG;
         return CSourceStream::SetMediaType(mt);
     }
 
@@ -254,11 +310,10 @@ public:
 
     HRESULT FillBuffer(IMediaSample* sample) override {
         int dw, dh;
+        Fmt fmt;
         {
             CAutoLock lock(m_pFilter->pStateLock());
-            const VIDEOINFOHEADER* vih = reinterpret_cast<const VIDEOINFOHEADER*>(m_mt.Format());
-            dw = vih->bmiHeader.biWidth;
-            dh = vih->bmiHeader.biHeight;
+            if (!TypeOf(&m_mt, &dw, &dh, &fmt)) return E_FAIL;
         }
         int64_t now = Qpc();
         if (!started_) { start_ = now; n_ = 0; started_ = true; }
@@ -272,7 +327,7 @@ public:
         BYTE* data = nullptr;
         sample->GetPointer(&data);
         long size = sample->GetSize();
-        long want = (long)dw * dh * 4;
+        long want = (long)((int64_t)dw * dh * Bits(fmt) / 8);
         if (!data || size < want) return E_FAIL;
 
         int sw, sh;
@@ -292,10 +347,12 @@ public:
             last_ = kWriting;
             frame_.clear();
         }
-        if (!frame_.empty() && fw_ > 0)
-            Convert(frame_.data(), fw_, fh_, data, dw, dh, &xmap_);
+        if (frame_.empty() || fw_ <= 0)
+            Black(data, dw, dh, fmt);  // SmoovPlay isn't playing
+        else if (fmt == kNV12)
+            ToNV12(frame_.data(), fw_, fh_, data, dw, dh, &xmap_);
         else
-            memset(data, 0, want);  // SmoovPlay isn't playing: black
+            ToRGB32(frame_.data(), fw_, fh_, data, dw, dh, &xmap_);
 
         REFERENCE_TIME t0 = n_ * 10000000LL / kFps, t1 = (n_ + 1) * 10000000LL / kFps;
         sample->SetTime(&t0, &t1);
@@ -311,7 +368,8 @@ public:
     STDMETHODIMP SetFormat(AM_MEDIA_TYPE* pmt) override {
         if (!pmt) return E_POINTER;
         int w, h;
-        if (!SizeOf(pmt, &w, &h)) return E_INVALIDARG;
+        Fmt f;
+        if (!TypeOf(pmt, &w, &h, &f)) return E_INVALIDARG;
         CAutoLock lock(m_pFilter->pStateLock());
         if (m_pFilter->IsActive()) return VFW_E_WRONG_STATE;
         m_mt = *pmt;
@@ -333,16 +391,18 @@ public:
 
     STDMETHODIMP GetNumberOfCapabilities(int* count, int* size) override {
         if (!count || !size) return E_POINTER;
-        *count = kNumSizes;
+        *count = kNumTypes;
         *size = sizeof(VIDEO_STREAM_CONFIG_CAPS);
         return S_OK;
     }
 
     STDMETHODIMP GetStreamCaps(int i, AM_MEDIA_TYPE** ppmt, BYTE* caps) override {
         if (!ppmt || !caps) return E_POINTER;
-        if (i < 0 || i >= kNumSizes) return S_FALSE;
+        if (i < 0 || i >= kNumTypes) return S_FALSE;
+        Fmt f = (Fmt)(i % kNumFmts);
+        i /= kNumFmts;
         CMediaType mt;
-        MakeType(&mt, kSizes[i].w, kSizes[i].h);
+        MakeType(&mt, kSizes[i].w, kSizes[i].h, f);
         *ppmt = CreateMediaType(&mt);
         if (!*ppmt) return E_OUTOFMEMORY;
         VIDEO_STREAM_CONFIG_CAPS* c = reinterpret_cast<VIDEO_STREAM_CONFIG_CAPS*>(caps);
@@ -352,7 +412,7 @@ public:
             SIZE{kSizes[i].w, kSizes[i].h};
         c->CropGranularityX = c->CropGranularityY = c->OutputGranularityX = c->OutputGranularityY = 1;
         c->MinFrameInterval = c->MaxFrameInterval = kFrameTime;
-        c->MinBitsPerSecond = c->MaxBitsPerSecond = (LONG)((int64_t)kSizes[i].w * kSizes[i].h * 32 * kFps);
+        c->MinBitsPerSecond = c->MaxBitsPerSecond = (LONG)((int64_t)kSizes[i].w * kSizes[i].h * Bits(f) * kFps);
         return S_OK;
     }
 
@@ -395,7 +455,7 @@ private:
     bool started_ = false;
     uint64_t last_ = kWriting, delivered_ = 0, repeats_ = 0, skipped_ = 0;
     std::vector<uint8_t> frame_;
-    std::vector<int> xmap_;
+    XMap xmap_;
     int fw_ = 0, fh_ = 0;
 };
 
@@ -446,8 +506,9 @@ HRESULT Register(bool on) {
                                     sizeof(L"Both"));
             hr = HRESULT_FROM_WIN32(r);
             if (SUCCEEDED(hr)) {
-                REGPINTYPES type = {&MEDIATYPE_Video, &MEDIASUBTYPE_RGB32};
-                REGFILTERPINS pin = {nullptr, FALSE, TRUE, FALSE, FALSE, &CLSID_NULL, nullptr, 1, &type};
+                REGPINTYPES types[] = {{&MEDIATYPE_Video, &MEDIASUBTYPE_RGB32},
+                                       {&MEDIATYPE_Video, &SPVC_MEDIASUBTYPE_NV12}};
+                REGFILTERPINS pin = {nullptr, FALSE, TRUE, FALSE, FALSE, &CLSID_NULL, nullptr, 2, types};
                 REGFILTER2 rf2;
                 rf2.dwVersion = 1;
                 rf2.dwMerit = MERIT_DO_NOT_USE;
