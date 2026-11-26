@@ -419,6 +419,8 @@ def main() -> int:
         print(f"[capture] asking the card for {cw}x{ch}" + ("" if (cw, ch) == (1920, 1080) else
               " (Capture card resolution: every new frame is drawn at this size, so it costs more than 1080p)"))
         src = open_capture(a, cw, ch, test)
+        if hasattr(src, "set_frame_log"):
+            src.set_frame_log(frame_log(a.results))
     elif kind == "window":
         if not a.window:
             ap.error("--source window needs --window APP (python -m framegen.window --list shows the windows)")

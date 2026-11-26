@@ -18,7 +18,6 @@ Windows and Linux: the operating system parts are in tapsys.py.
 
 from __future__ import annotations
 
-import csv
 import queue
 import struct
 import sys
@@ -505,12 +504,11 @@ class ChiakiSource:
         self.check = StreamCheck()  # how well the size check read this game: reported when the session ends
         self._stop = False
         self._log = None
-        if log_path:
-            f = open(log_path, "w", newline="")
-            self._log = (f, csv.writer(f))
-            self._log[1].writerow(["tick", "seq", "t_arrival_ms", "size", "frames_lost", "recovered", "keyframe",
-                                   "decode_ms", "queue_ms", "size_says_new", "image_says_new", "max_diff",
-                                   "mean_diff", "action", "proc_ms"])
+        if log_path:  # written by its own thread: no file writes on the frame path (framegen/framelog.py)
+            from .framelog import FrameLog
+            self._log = FrameLog(log_path, ["tick", "seq", "t_arrival_ms", "size", "frames_lost", "recovered",
+                                            "keyframe", "decode_ms", "queue_ms", "size_says_new", "image_says_new",
+                                            "max_diff", "mean_diff", "action", "proc_ms"])
         self._t0 = time.perf_counter()
         self._beat = self._t0  # when the reader's loop last went round (why() says if it stopped)
         self._no_header = False  # joined a running stream whose codec header went past, and none was saved
@@ -826,7 +824,7 @@ class ChiakiSource:
             return
         e = tick.extra
         hint = e.get("size_new")
-        self._log[1].writerow([tick.index, e.get("seq"), f"{(tick.t_arrival - self._t0) * 1000:.2f}", e.get("size"),
+        self._log.row([tick.index, e.get("seq"), f"{(tick.t_arrival - self._t0) * 1000:.2f}", e.get("size"),
                                e.get("frames_lost"), int(bool(e.get("recovered"))), int(bool(e.get("keyframe"))),
                                f"{e.get('decode_ms', 0):.2f}", f"{(t_start - tick.t_arrival) * 1000:.2f}",
                                "" if hint is None else int(hint), int(diff.is_new), f"{diff.max_diff:.2f}",
@@ -835,7 +833,7 @@ class ChiakiSource:
     def close(self) -> None:
         self._stop = True
         if self._log is not None:
-            self._log[0].close()
+            self._log.close()
         try:
             self.sound.close()
         except (BufferError, ValueError):  # still being read: it goes with the process

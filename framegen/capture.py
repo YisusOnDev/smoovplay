@@ -465,7 +465,7 @@ class CardSource:
     """
 
     def __init__(self, container, name: str, live: bool, test=None, device: str | None = "auto",
-                 colour="auto", range_hint: str = "", queue_size: int = 3, decode_to: str = "", audio=None) -> None:
+                 colour="auto", range_hint: str = "", queue_size: int = 6, decode_to: str = "", audio=None) -> None:
         from .sources import source_info
         self.container, self.live, self.test = container, live, test
         self.stream = container.streams.video[0]
@@ -855,9 +855,29 @@ class CardSource:
         from .io import queue_ticks
         yield from queue_ticks(self.q, "the capture card")
 
+    # ---- the per-frame log (frames-<session>.csv, from the launcher): what the card sent and what became of it
+    _log = None
+
+    def set_frame_log(self, path: str | None) -> None:
+        if path:
+            from .framelog import FrameLog
+            self._log = FrameLog(path, ["tick", "seq", "t_arrival_ms", "t_source_ms", "queue_ms", "dropped",
+                                        "image_says_new", "mean_diff", "action", "proc_ms"])
+            self._log_t0 = time.perf_counter()
+
+    def log_tick(self, tick, diff, action, proc_ms: float, t_start: float) -> None:
+        if self._log is None:
+            return
+        ts = tick.t_source
+        self._log.row([tick.index, tick.extra.get("seq"), f"{(tick.t_arrival - self._log_t0) * 1000:.2f}",
+                       "" if ts is None else f"{ts * 1000:.2f}", f"{(t_start - tick.t_arrival) * 1000:.2f}",
+                       self.dropped, int(diff.is_new), f"{diff.mean_diff:.3f}", action.value, f"{proc_ms:.2f}"])
+
     def close(self) -> None:
         self._stop = True
         self._go.set()
+        if self._log is not None:
+            self._log.close()
         try:
             self.container.close()
         except Exception:  # noqa: BLE001 - closing

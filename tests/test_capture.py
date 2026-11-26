@@ -416,3 +416,29 @@ def test_no_frame_comes_while_a_cuda_graph_is_being_captured(tmp_path):
     assert done.wait(5)
     src.close()
     assert len(got) == 2
+
+
+def test_a_card_session_writes_its_frame_log_off_the_frame_path(tmp_path):
+    # The launcher's frames-<session>.csv, for capture cards too: rows are handed to the log's own thread
+    from types import SimpleNamespace
+
+    from framegen.cadence import Action
+    a, _ = _blocks(seed=7)
+    h, w = a.shape[:2]
+    src = c.CardSource.raw_file(_raw_file(tmp_path, [a, a, a]), w, h, "nv12", fps=240, device="cpu",
+                                colour=(False, False))
+    log = tmp_path / "frames.csv"
+    src.set_frame_log(str(log))
+    for t in src:
+        if hasattr(t, "frame"):
+            src.log_tick(t, SimpleNamespace(is_new=True, mean_diff=1.0), Action.CURRENT, 3.5, t.t_arrival)
+    src.close()
+    rows = log.read_text().splitlines()
+    assert rows[0].startswith("tick,seq,t_arrival_ms,t_source_ms") and len(rows) == 4
+    assert rows[1].split(",")[1] == "0"  # the card's own frame number
+
+
+def test_the_card_queue_rides_out_a_short_stall():
+    assert c.CardSource.__init__.__defaults__ is not None
+    import inspect
+    assert inspect.signature(c.CardSource.__init__).parameters["queue_size"].default >= 6  # ~100 ms at 60 fps
