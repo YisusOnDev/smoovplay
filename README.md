@@ -50,11 +50,28 @@
 >   probar en una NVIDIA real.
 > - **El registro de cada sesión apunta todos los ajustes** y cada cambio mientras juegas, para poder ver cómo
 >   jugó cada uno.
+> - **SmoovPlay Camera**, una cámara para OBS con todos los fotogramas parejos (más abajo).
 > - **Arreglos que otros han propuesto al original y aún no están en él:** el sonido de la capturadora ya no se va
 >   retrasando durante la sesión (Elgato HD60 X), activar la interpolación mientras el juego baja de 30 fps ya no
 >   cierra la sesión, y guardar dos repeticiones en el mismo segundo ya no estropea una.
 > - También trae lo último del original que aún no ha salido en su release (lo de Linux y macOS, que en Windows
 >   no cambia nada).
+>
+> **Para hacer streaming con OBS: SmoovPlay Camera.** En vez de capturar la ventana de SmoovPlay, activa
+> *Settings → Streaming → SmoovPlay Camera* y en OBS añade *Fuente → Dispositivo de captura de vídeo → SmoovPlay
+> Camera*, con *Búfer: Activar*. Por qué es mejor:
+> - **Llegan todos los fotogramas, parejos a 60 fps.** OBS hace una "foto" de la ventana cada 1/60 s y, como el
+>   fotograma intermedio está poco tiempo en pantalla, a la retransmisión solo llegaba alrededor de un tercio de
+>   ellos. La cámara le pasa cada fotograma en orden: en una prueba de 20 s llegaron los 1196, sin repetidos ni
+>   saltados.
+> - **Sin el menú, los avisos ni las estadísticas**, y sigue funcionando en pantalla completa aunque hagas clic en
+>   SmoovPlay (la captura de ventana se congelaba).
+> - **Solo vídeo:** el sonido del juego se captura como siempre. La imagen de la cámara va 80 ms por detrás de la
+>   de tu pantalla, así que en OBS dale al sonido del juego un *desfase de sincronización* de +80 ms (Propiedades
+>   avanzadas de audio).
+> - **No funciona con OBS abierto como administrador** (Windows no le deja ver cámaras instaladas por usuario).
+>   Abre OBS normal.
+> - Lo que ves tú en tu pantalla no cambia, y no cuesta nada mientras OBS no tenga la cámara abierta.
 >
 > **Avisos (léelos):**
 > - **No es oficial.** Si algo falla con esta versión, avisa aquí ([issues](https://github.com/YisusOnDev/smoovplay/issues)),

@@ -31,7 +31,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-VERSION = "0.3.13-yisus.2"  # a pre-release sorts before its release: 0.1.0-beta.2 and 0.1.0 both show as updates
+VERSION = "0.3.13-yisus.3"  # a pre-release sorts before its release: 0.1.0-beta.2 and 0.1.0 both show as updates
 # "owner/name" of the GitHub repo whose releases the launcher checks for updates; empty turns the check off
 RELEASES_REPO = "YisusOnDev/smoovplay"  # this fork (the original: smoovplay/smoovplay)
 SIGNING_KEY = Path(os.environ.get("SMOOVPLAY_SIGNING_KEY") or Path.home() / ".smoovplay" / "update-signing-key.xml")
@@ -51,6 +51,7 @@ CACHE = HERE / ".cache"
 CSC_CANDIDATES = [Path(os.environ["SMOOVPLAY_CSC"])] if os.environ.get("SMOOVPLAY_CSC") else []  # e.g. NuGet's
 CSC_CANDIDATES += [  # Microsoft.Net.Compilers.Toolset, tasks/net472/csc.exe: no Visual Studio needed
     Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe"),
+    Path(r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe"),
     Path(r"C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe"),
     Path(r"C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\Roslyn\csc.exe"),
 ]
@@ -206,6 +207,10 @@ def stage_payload(stage: Path, launcher: Path, chiaki_build: Path, chiaki_src: P
     shutil.copy2(ROOT / "LICENSE", stage / "LICENSE.txt")
     shutil.copy2(HERE / "THIRD_PARTY_NOTICES.txt", stage)
     shutil.copy2(launcher, stage / "SmoovPlay.exe")
+    # SmoovPlay Camera: one file name per version, so an update never replaces a DLL OBS has loaded (Core.cs
+    # RegisterCamera registers the new one and deletes the old ones once they're free)
+    (stage / "camera").mkdir()
+    shutil.copy2(build_camera(), stage / "camera" / f"smoovplay-camera-{VERSION}.dll")
 
     # chiaki-ng: the deployed build, its licences and the source of our patch (AGPL: corresponding source).
     chiaki = stage / "chiaki"
@@ -238,6 +243,19 @@ def stage_payload(stage: Path, launcher: Path, chiaki_build: Path, chiaki_src: P
         "With the tap built in, chiaki-ng behaves exactly as before unless CHIAKI_FRAMETAP=1 is set.\n"
         "FFmpeg is the gpl-shared build from https://github.com/streetpea/FFmpeg-Builds (its source and build "
         "scripts are there).\n", encoding="utf-8")
+
+
+def build_camera() -> Path:
+    """SmoovPlay Camera's DLL (native/vcam/build.bat: Visual Studio's C++ build tools)."""
+    bat = ROOT / "native" / "vcam" / "build.bat"
+    res = subprocess.run(["cmd", "/c", str(bat)], capture_output=True, text=True)
+    dll = ROOT / "native" / "vcam" / "build" / "smoovplay-camera.dll"
+    if res.returncode != 0 or not dll.exists():
+        print(res.stdout[-3000:], res.stderr[-2000:])
+        sys.exit("[build] building SmoovPlay Camera (native/vcam/build.bat) failed: it needs Visual Studio's C++ "
+                 "build tools")
+    log(f"SmoovPlay Camera: {dll.stat().st_size / 1e3:.0f} KB")
+    return dll
 
 
 def zip_dir(src: Path, out: Path) -> None:

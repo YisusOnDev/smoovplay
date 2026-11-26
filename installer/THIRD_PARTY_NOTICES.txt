@@ -16,6 +16,12 @@ Included in SmoovPlay (app\ folder)
   Gran Turismo 7 (c) Sony Interactive Entertainment, and skate. (c) Electronic Arts. Included only to show what
   a look does; they belong to their publishers and aren't covered by SmoovPlay's MIT licence.
 
+Included in SmoovPlay Camera (camera\ folder)
+----------------------------------------------
+* Microsoft DirectShow base classes (Windows-classic-samples, Samples/Win7Samples/multimedia/directshow/
+  baseclasses). MIT License, Copyright (c) Microsoft Corporation. Source and full text in SmoovPlay's
+  repository, native\vcam\baseclasses.
+
 Bundled as a separate program (chiaki\ folder)
 ----------------------------------------------
 * chiaki-ng 1.10.1 with SmoovPlay's frame-tap patch. GNU Affero General Public License 3.0 (with the

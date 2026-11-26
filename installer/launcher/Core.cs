@@ -474,6 +474,23 @@ namespace SmoovPlay
                 k.SetValue("NoRepair", 1, RegistryValueKind.DWord);
                 k.SetValue("EstimatedSize", (int)(DirSize(p.Install) / 1024), RegistryValueKind.DWord);
             }
+            RegisterCamera();
+        }
+
+        /// <summary>SmoovPlay Camera (native/vcam): registered for this user (no admin) so OBS lists it. Each version's
+        /// DLL has its own name, so an update never has to replace one OBS has loaded; older ones are deleted once
+        /// nothing has them open.</summary>
+        void RegisterCamera()
+        {
+            string dir = Path.Combine(p.Install, Camera.Folder);
+            string dll = Path.Combine(dir, Camera.DllName);
+            if (!File.Exists(dll)) return;
+            Step("Adding SmoovPlay Camera (for OBS)");
+            int code = Camera.Regsvr32(dll, true);
+            Log(code == 0 ? "SmoovPlay Camera registered for this user" : "SmoovPlay Camera: regsvr32 exited with " + code);
+            foreach (var old in Directory.GetFiles(dir, "smoovplay-camera-*.dll"))
+                if (!string.Equals(old, dll, StringComparison.OrdinalIgnoreCase))
+                    try { File.Delete(old); } catch (Exception) { }  // OBS still has it open: next time
         }
 
         int RunPython(string args, string cwd, Action<string> onLine)
@@ -628,6 +645,39 @@ namespace SmoovPlay
         }
     }
 
+    /// <summary>SmoovPlay Camera's DLL (native/vcam) and its per-user COM registration.</summary>
+    static class Camera
+    {
+        public const string Folder = "camera";
+        public const string Clsid = "{FF8D8E89-B9C7-460D-A281-104B34FDCFB0}";
+        const string Instance = @"Software\Classes\CLSID\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\Instance\SmoovPlay Camera";
+        public static string DllName { get { return "smoovplay-camera-" + BuildInfo.Version + ".dll"; } }
+
+        /// <summary>regsvr32 /n /i:user (DllInstall "user"): HKCU only, no admin. Returns its exit code.</summary>
+        public static int Regsvr32(string dll, bool register)
+        {
+            string args = "/s " + (register ? "" : "/u ") + "/n /i:user \"" + dll + "\"";
+            try
+            {
+                using (var pr = Process.Start(new ProcessStartInfo(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "regsvr32.exe"), args)
+                    { CreateNoWindow = true, UseShellExecute = false }))
+                {
+                    if (!pr.WaitForExit(30000)) return -1;
+                    return pr.ExitCode;
+                }
+            }
+            catch (Exception) { return -2; }
+        }
+
+        /// <summary>Removes the registration without the DLL (it may be gone, or OBS may have it open).</summary>
+        public static void Unregister()
+        {
+            try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\CLSID\" + Clsid, false); } catch (Exception) { }
+            try { Registry.CurrentUser.DeleteSubKeyTree(Instance, false); } catch (Exception) { }
+        }
+    }
+
     static class Uninstaller
     {
         public const string Key = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\SmoovPlay";
@@ -650,10 +700,11 @@ namespace SmoovPlay
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "SmoovPlay.lnk") })
                 try { if (File.Exists(lnk)) File.Delete(lnk); } catch (Exception) { }
             try { Registry.CurrentUser.DeleteSubKeyTree(Key, false); } catch (Exception) { }
+            Camera.Unregister();
             // Only what setup created is removed, then the folder itself if that leaves it empty. This exe is inside
             // it, so a short-lived cmd does the deleting once we've exited.
             var cmd = new StringBuilder("/c ping 127.0.0.1 -n 3 > nul");
-            foreach (var sub in new[] { "app", "runtime", "chiaki", "logs" })
+            foreach (var sub in new[] { "app", "runtime", "chiaki", "logs", Camera.Folder })
                 cmd.Append($" & rmdir /s /q \"{Path.Combine(dir, sub)}\"");
             foreach (var f in new[] { "SmoovPlay.exe", "install.log", "LICENSE.txt", "THIRD_PARTY_NOTICES.txt" })
                 cmd.Append($" & del /q \"{Path.Combine(dir, f)}\"");
