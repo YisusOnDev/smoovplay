@@ -68,7 +68,7 @@ from framegen.interpolator import MODELS, RifeInterpolator
 from framegen.io import (TICK, CaptureSource, FileSink, FileSource, GLWindowSink, MultiSink, Ps5SimSource,
                          WindowSink)
 from framegen.pipeline import Pipeline
-from framegen.settings import BY_KEY, DEFAULT_PATH, SPECS, Settings
+from framegen.settings import BY_KEY, DEFAULT_PATH, SPECS, Settings, log_line, log_value
 from framegen.sources import TestMode, make_detector
 from framegen.vfg import vfg_unavailable
 
@@ -595,6 +595,10 @@ def main() -> int:
 
     cfg = session_config()
     print(f"[run] {src.w}x{src.h}  {describe(cfg)}  output {settings.hz} Hz")
+    # Every setting in the log, as this run uses it (command-line flags and this run's overrides included), then each
+    # change made while it plays (the menu, the launcher's Settings page)
+    print(f"[settings] {log_line(settings.values())}")
+    settings.watch(lambda key: print(f"[settings] {key} -> {log_value(getattr(settings, key))}", flush=True))
     cfg, interp = build_or_rife(cfg)
 
     unavailable = {s.key: why for s in SPECS if (why := s.unused_with(picked or ""))}  # e.g. Capture card resolution

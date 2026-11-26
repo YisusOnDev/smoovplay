@@ -447,6 +447,18 @@ class Settings:
             print(f"[settings] couldn't save {self.path}: {e}")
 
 
+def log_value(value: Any) -> str:
+    """A setting's value as the session log writes it: on/off for a switch, else as it's stored."""
+    return "on" if value is True else "off" if value is False else str(value)
+
+
+def log_line(values: dict) -> str:
+    """Every setting as key=value on one line, for the session log: with it, a log someone sends (Copy diagnostics)
+    says how they played, not only what the pipeline happened to print. Values are only ever one of each setting's
+    fixed choices, so nothing personal goes in."""
+    return " ".join(f"{k}={log_value(v)}" for k, v in values.items())
+
+
 def specs_json(specs: tuple[Spec, ...] = SPECS) -> dict:
     """The registry for the launcher's Settings page: every setting with its choices in display order, and where the
     saved file is. Values are JSON types; the launcher sends a choice back exactly as given here."""

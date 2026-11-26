@@ -423,3 +423,21 @@ def test_settings_for_one_source_say_why_not_with_the_others():
     rows = {d["key"]: d for d in specs_json()["specs"]}
     assert rows["capture_size"]["sources"] == ["capture"] and rows["capture_size"]["elsewhere"][""]
     assert rows["fill"]["sources"] is None and rows["fill"]["elsewhere"] is None
+
+
+def test_the_log_line_has_every_setting_as_this_run_uses_it():
+    from framegen.settings import SPECS, log_line
+    st = Settings({"hz": 120, "vsync": True})
+    st.override("interp", False)
+    line = log_line(st.values())
+    pairs = dict(p.split("=", 1) for p in line.split(" "))
+    assert list(pairs) == [s.key for s in SPECS]  # all of them, in the menu's order
+    assert pairs["hz"] == "120" and pairs["vsync"] == "on" and pairs["interp"] == "off"
+    assert all("=" not in v and v for v in pairs.values())  # one word each, so the line splits back
+
+
+def test_every_choice_logs_as_one_word():
+    from framegen.settings import SPECS, log_value
+    for s in SPECS:
+        for v in s.choices:
+            assert log_value(v) and " " not in log_value(v), (s.key, v)
