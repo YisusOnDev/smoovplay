@@ -47,7 +47,6 @@ NAV = ("Up", "Down", "Left", "Right", "Enter", "Esc", "Backspace")  # the menu's
 # Windows' own, or keys people need to get out of things: never taken
 RESERVED = {"Ctrl+Alt+Delete", "Ctrl+Shift+Esc", "Alt+Tab", "Alt+Esc", "Alt+F4", "Ctrl+Alt+Tab", "Win+L", "Win+D",
             "Win+Tab", "Ctrl+Esc", "Win"}
-OWN = {"Ctrl+Alt+R": "saving a replay", "Ctrl+Alt+B": "saving a before & after"}  # instant replay's (replay.py)
 
 
 @dataclass(frozen=True)
@@ -106,9 +105,6 @@ def parse_arg(text: str | None) -> dict[str, str]:
     names = list(out.values())
     if len(set(names)) != len(names):
         raise ValueError("two actions have the same shortcut")
-    for action, name in out.items():
-        if name in OWN:
-            raise ValueError(f"{action}: {name} is SmoovPlay's own, for {OWN[name]}")
     return out
 
 

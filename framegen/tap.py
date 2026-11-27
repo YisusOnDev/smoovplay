@@ -26,8 +26,8 @@ from dataclasses import replace
 
 import numpy as np
 
-from .chiaki_tap import (AUDIO_SUFFIX, CODEC_NAMES, CODECS, COLOURS, FEATURE_VARIABLE, FLAG_NEW, FLAG_REPEAT,
-                         RAW_BYTES, RAW_CODECS, AudioTap, FrameTap, Header)
+from .chiaki_tap import (CODEC_NAMES, CODECS, COLOURS, FEATURE_VARIABLE, FLAG_NEW, FLAG_REPEAT, RAW_BYTES, RAW_CODECS,
+                         FrameTap, Header)
 from .io import Tick
 from .sync import CAPTURE_LOCK
 
@@ -86,7 +86,6 @@ class TapSource:
         from .capture import _cuda_device
         from .sources import source_info
         self.tap, self.test = tap, test
-        self.sound = AudioTap(name + AUDIO_SUFFIX)  # the app's sound, if it sends any, for instant replay
         self.codec, self.session = header.codec, header.session
         self.fmt = RAW_CODECS[header.codec]
         self.w, self.h = header.width, header.height
@@ -216,13 +215,6 @@ class TapSource:
             return "The app isn't sending any frames. Is it still running?"
         return ""
 
-    # Instant replay's sound, if the writer fills the sound ring (docs/frame-tap.md); the app plays its own sound.
-    def has_sound(self) -> bool:
-        return self.sound.live()
-
-    def read_sound(self) -> list:
-        return self.sound.read_new()
-
     def can_press(self) -> bool:
         return False
 
@@ -238,5 +230,4 @@ class TapSource:
         self._thread.join(timeout=2)
         if not self._thread.is_alive():  # (a reader stuck mid-copy keeps the memory mapped until it exits)
             self.tap.close()
-            self.sound.close()
         print(f"[tap] dropped frames: {self.dropped}, overwritten before they were read: {self.skipped}")

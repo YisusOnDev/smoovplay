@@ -9,7 +9,7 @@ game to show, and none of these is real ultrawide. They're different ways of lay
 - stretch: fills the screen by making everything wider (or taller).
 - panorama: screens wider than the picture only. The middle stays close to its true shape and the stretch grows
   towards the sides, like a TV's wide zoom: usually easier on the eye than stretch. One extra pass over the screen
-  (Panorama), after the upscaler and the look.
+  (Panorama), after the upscaler.
 
 layout() and visible() are the arithmetic (tested without a GPU); Panorama is the GL pass.
 """

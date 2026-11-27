@@ -1,7 +1,7 @@
 # Developing SmoovPlay
 
-Everything for working on SmoovPlay itself: every command and tool, settings and hotkeys, how Instant replay and
-Looks work inside, the scheduler, upscaling, NVIDIA VFG, measured results and known limits. For what SmoovPlay is
+Everything for working on SmoovPlay itself: every command and tool, settings and hotkeys, the scheduler,
+upscaling, NVIDIA VFG, measured results and known limits. For what SmoovPlay is
 and how to get it, see the [README](../../README.md).
 
 ## What's where
@@ -106,8 +106,8 @@ The settings are in two places, which stay in step:
 - **The launcher's Settings page.** With nothing playing, changes are saved for the next session. While a stream
   plays, the page shows **LIVE** and changes reach the video straight away, as if made in the video window's menu.
 - **The video window's menu.** Press **M** (or Tab). Its main page has the quick picks (frame generation, output
-  frame rate, upscaler) and a row for each section (Smoothness, Picture, Looks, Display, Instant replay, PS5 Remote
-  Play, as on the Settings page): ↑/↓ pick, ←/→ change a setting, Enter or → opens a section, Esc or Backspace goes
+  frame rate, upscaler) and a row for each section (Smoothness, Picture, Display, PS5 Remote Play, as
+  on the Settings page): ↑/↓ pick, ←/→ change a setting, Enter or → opens a section, Esc or Backspace goes
   back a page, and M (or Esc on the main page) closes it. It reopens where it was left. The video keeps playing
   behind it, so changes can be judged as they're made.
 
@@ -152,8 +152,6 @@ made-up PCs.
 | Simulate a 30 fps game | Off / On | live, this session only, never saved (any 60 Hz source: Remote Play, a capture card, or a file with `--raw`; `--test-mode`) |
 | Debug snapshots | Off / On (this session only, never saved: every 5 s the real frame and Steady HUD's mask go into `logs\debug-<session>\`, with a `[debug]` line in the log; [`framegen/debugsnap.py`](../framegen/debugsnap.py)) | live |
 | Steady HUD | Off / On (off by default; results vary by game; RIFE on CUDA and DirectML, and NVIDIA VFG, [`framegen/steady.py`](../framegen/steady.py)) | live |
-| Look, Which look | Off / On, and SmoovPlay's looks and yours (made on the launcher's Looks page) | live |
-| Looks in clips | Off / On (the look in saved instant replays too; only SmoovPlay's half of a before & after video) | live |
 | Interpolation model | RIFE 4.22 lite / NVIDIA VFG (RTX 40 and 50 series, optional download, see below) | **restart** |
 | VFG quality | Low / Medium / High (NVIDIA VFG only) | **restart** |
 | AI engine | Auto (TensorRT at full motion detail, PyTorch at half: the faster for each) / TensorRT / PyTorch (RIFE only) | **restart** |
@@ -167,39 +165,13 @@ that list. The launcher talks to a running session through its stdin and stdout 
 `framegen/remote.py`).
 
 Hotkeys: `i` interpolation on/off for this session (instant A/B, not saved), `s` stats overlay (off, minimal,
-detailed), `f` fullscreen, `u` next upscaler, `l` delay test (PS5 Remote Play), `r` save the instant replay, `b` save a before &
-after video of it, `k` look on/off, `j` next look (`Shift+J` back), `q` or Esc quit. A short note in the corner confirms each one. While instant replay is on,
-`Ctrl+Alt+R` and `Ctrl+Alt+B` work from any window.
-
-Instant replay (`framegen/replay.py`) keeps three tracks in memory as MPEG-TS pieces, one per encoded packet: every
-frame shown (timed when it was shown, so 90 fps is 90), each new game frame (timed when it arrived plus SmoovPlay's
-delay, so it lines up), and the game's sound, which chiaki-ng copies into a second shared-memory ring (see
-[`chiaki_tap/`](../chiaki_tap/)) or a capture card's player hands over. Frames go to YUV on the graphics card (0.3 ms
-at 1080p), to memory on a side stream, and to NVENC (else AMF, QSV or x264) on a thread of their own. Saving cuts
-from the keyframe before the start (one a second) and remuxes to MP4 without re-encoding; a before & after video is
-composed and encoded by `python -m framegen.replay compose` in a low-priority process of its own.
+detailed), `f` fullscreen, `u` next upscaler, `l` delay test (PS5 Remote Play), `q` or Esc quit. A short note in the corner confirms each one.
 
 Fill the screen (`framegen/fill.py`): where the picture goes on a screen that isn't its shape. Consoles send 16:9 only,
 so on an ultrawide each mode lays out the same 16:9 picture: Fit and Zoom are a rectangle (Zoom's goes past the
 screen's edges), Stretch is the whole screen, and Panorama draws Fit into a half-float texture, then bends it across
 the screen with u = atan(t·x) / atan(t), t picked so the middle is 5% (21:9) to 15% (32:9) wider than true. Messages and
-the menu go on the part of the picture that's on screen. Clips and the instant replay record the stream, not the screen,
-so they're unchanged.
-
-Looks (`framegen/looks.py`, `framegen/looks_gl.py`): a look is JSON, `{"name", "nodes": [{"type", "on", "mix",
-...}]}`, cleaned by `normalize()`. Yours are files in `%APPDATA%\framegen\looks`, with LUTs in its `luts` folder. The
-video window draws a look in passes: the per-pixel effects share one shader, and each effect that reads neighbouring
-pixels (bloom, halation, blur, clarity, aberration, sharpening) starts a new pass on a half-float image; bloom,
-halation, blur and clarity use a pyramid of up to 6 halvings. `looks.render()` does the same maths in NumPy, and the tests compare the
-shaders with it. With **Looks in clips** on, the look is drawn again at the stream's size into a texture that CUDA
-reads, for the SmoovPlay track only. A share code is `SPL1-` and base64url of a compact binary: each value as its
-difference from the default, deflated when that's shorter, with a 16-bit checksum; a newer version's extra
-settings are skipped by older ones. The launcher's Looks page uses `python -m framegen.looks` (`schema`, `encode`,
-`decode`, `import`, `save`, `delete`, `add-lut`) and shows edits live with the `look-show`, `look-hide` and
-`looks-reload` commands (`framegen/remote.py`). Its preview is `python -m framegen.looks_preview`, a process that
-draws looks on the sample pictures (`framegen/samples`) with the video window's own shaders in a hidden OpenGL context
-(about a millisecond a picture; NumPy without OpenGL), one JSON request per line on stdin.
-`python -m framegen.looks preview LOOK IN.png OUT.png` puts a look (an id or a code) on a picture.
+the menu go on the part of the picture that's on screen.
 
 Command-line flags (`--hz`, `--scaler`, `--fsr-sharpness`, `--vsr-quality`, `--engine`/`--trt`, `--off`,
 `--vsync`, `--fullscreen`, `--minimize-chiaki`, `--steady-hud`, `--present gl|dxgi`, `--test-mode`, `--model vfg`
@@ -374,9 +346,9 @@ Timing from a recorded clip, not a live stream, paced at 60 Hz with the OpenGL w
 - **1080p.** Remote Play arrives at 1080p, so the picture is a little softer than HDMI straight from the console.
 - **HDR** (*Experimental*, Settings → HDR, off by default). For a PS5 streaming in HDR: pick the H.265 HDR codec in
   chiaki-ng, then turn HDR on. **On, shown in SDR** gives the stream its real colours on any monitor. **On, HDR
-  output** keeps it HDR all the way to a monitor with Windows' HDR on, with Looks and RTX VSR off. A contributor has
+  output** keeps it HDR all the way to a monitor with Windows' HDR on, with RTX VSR off. A contributor has
   played a real PS5 HDR stream this way on an HDR monitor, and since 0.3.2 fullscreen keeps Windows' HDR on instead
-  of switching the display to SDR. Instant replay clips are saved in SDR either way.
+  of switching the display to SDR.
 - **Some wobble.** HUD text over fast motion, very fast camera turns and thin objects crossing each other can wobble
   a little. Press **I** in the video window to compare with frame generation off.
 - **Sound and picture stay in step.** chiaki-ng plays the sound, and SmoovPlay tells it to hold the sound back
@@ -384,27 +356,6 @@ Timing from a recorded clip, not a live stream, paced at 60 Hz with the OpenGL w
 - **Delay test:** press **L** in the video window, standing still where Options opens a menu. chiaki-ng presses
   Options six times and SmoovPlay times each answer, then shows the PS5 and Remote Play's part, its own part and
   the two together.
-- **Instant replay** (Settings, **Instant replay**: off until you pick a length, 30 seconds to 5 minutes) keeps
-  the last stretch of what you played. Press **R** in the video window (or **Ctrl+Alt+R** from anywhere) to save
-  it to your Videos folder, in SmoovPlay, as an MP4 at the frame rate you see, with the game's own sound (PS5
-  Remote Play and capture cards; window capture has none). Saving takes a second or two. **B** (**Ctrl+Alt+B**)
-  saves a **before & after** video instead: the game's own frames next to SmoovPlay's, split down the middle or
-  side by side, made in the background in about as long as the clip. The video encoder on your graphics card does
-  the recording, apart from the AI; a 1-minute replay at 1080p and 90 fps keeps about 310 MB in memory. Turning it
-  on during play pauses the picture for about 0.2 s once, while the encoders start.
-- **Looks** (the launcher's **Looks** page; off until you use one) put a grade on the picture. A look is a stack of
-  effects applied top to bottom, like the nodes of a color grading app, each with its own amount: color, color
-  wheels, split tone, black & white, LUTs (`.cube` files), bloom, halation, blur, clarity, chromatic aberration,
-  sharpening, film grain, vignette, scanlines, letterbox and color-blind assist. SmoovPlay comes with 14 (Cinematic,
-  Film, Vivid, Noir, Golden hour, Neon night, Retro VHS, Bleach bypass, Dreamy, Arctic, Sepia and three for color
-  blindness). Try any change on one of them, and **Save as mine** keeps it as a look of your own (**Reset** puts
-  SmoovPlay's back). The page draws the look on sample screenshots from Grand Theft
-  Auto VI and five other games as you change it (hold the picture to see it without the look, and the arrows go to
-  the next game). While you play, it shows your changes on the video as you make them, and in the video window **K** turns the look on and off and **J** goes to the next one (**Shift+J**
-  back). **Copy code** gives a short code (`SPL1-`, about 35 to 60 characters) that rebuilds the look on
-  anyone's SmoovPlay, through **Paste a code**. A look takes about 0.02 to 0.35 ms of graphics card time a frame at
-  1440p. Saved clips stay clean unless **Looks in clips** is on (Settings, Instant replay); then only SmoovPlay's
-  half of a before & after video gets the look.
 - **Measure the whole delay yourself** with a phone's 240 fps slow motion and `scripts/latency_video.py`: film
   the controller and screen (`press`: button to screen), or the PS5's own HDMI picture beside SmoovPlay's
   (`side`: what Remote Play and SmoovPlay add). The script's help says how to film it.

@@ -102,8 +102,8 @@ namespace SmoovPlay
         const double WideSettings = 820;  // from this content width, two columns of sections
         static readonly Dictionary<string, string> GroupIcons = new Dictionary<string, string>
         {
-            { "Smoothness", "\uEC4A" }, { "Picture", "\uE7B3" }, { "Display", "\uE7F4" }, { "Instant replay", "\uE714" },
-            { "Looks", "\uE790" }, { "PS5 Remote Play", "\uE7FC" }, { "Streaming", "\uE8B8" },
+            { "Smoothness", "\uEC4A" }, { "Picture", "\uE7B3" }, { "Display", "\uE7F4" }, { "PS5 Remote Play", "\uE7FC" },
+            { "Streaming", "\uE8B8" },
         };
         List<SettingSpec> settingSpecs;
         string settingsError;
@@ -115,12 +115,10 @@ namespace SmoovPlay
         Dictionary<string, object> liveState;  // the running session's last state line; null when none is reporting
 
         // ---- the list of settings, from the pipeline
-        /// <summary>force: again, e.g. after the Looks page added a look (a choice of "Which look"); the old list stays
-        /// up meanwhile, and if loading fails.</summary>
-        void LoadSettingSpecs(bool force = false)
+        void LoadSettingSpecs()
         {
             if (vfgStatus == null) LoadVfgStatus();
-            if (loadingSpecs || (settingSpecs != null && !force) || !paths.RuntimeReady) return;
+            if (loadingSpecs || settingSpecs != null || !paths.RuntimeReady) return;
             loadingSpecs = true;
             Task.Run(() =>
             {
@@ -139,7 +137,8 @@ namespace SmoovPlay
                 OnUi(() =>
                 {
                     loadingSpecs = false;
-                    if (specs != null || !force) { settingSpecs = specs; settingsError = err; }
+                    settingSpecs = specs;
+                    settingsError = err;
                     BuildSettings();
                 });
             });
@@ -269,8 +268,7 @@ namespace SmoovPlay
         // ---- the page
         void ShowSettings()
         {
-            LoadSettingSpecs(settingSpecsStale);
-            if (loadingSpecs) settingSpecsStale = false;
+            LoadSettingSpecs();
             ShowPage("PageSettings");
             RefreshSettings();
         }
@@ -890,7 +888,6 @@ namespace SmoovPlay
             restartSent = false;
             RefreshSettings();
             BuildChips();
-            OnLooksState();
             if (page == "PageSettings") SnapLater("settings-state", 400);
         }
 

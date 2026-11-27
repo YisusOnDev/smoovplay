@@ -137,7 +137,7 @@ The launcher finds new releases on GitHub and, with a click, installs them itsel
    * The signed version must be the release's tag, and newer than the running app.
    * Nothing runs if any check fails, and the error offers the release page instead.
 3. Closes chiaki-ng if it's running from this install, starts `SmoovPlay-Setup.exe --update --dir <install> --wait <launcher pid>`, and closes the launcher.
-4. Setup waits for the launcher to exit, then runs its usual steps in place. Python and packages already there are kept, and pip only adds what changed. Engines stay cached, and settings, looks and clips are kept. Then it opens SmoovPlay again.
+4. Setup waits for the launcher to exit, then runs its usual steps in place. Python and packages already there are kept, and pip only adds what changed. Engines stay cached, and settings are kept. Then it opens SmoovPlay again.
 
 The next launcher start deletes the downloaded setup. A dev launcher (`SMOOVPLAY_APP`), or a build without the update key, only links to the release page.
 

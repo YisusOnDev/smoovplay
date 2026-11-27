@@ -5,7 +5,7 @@
 
 Verifies the C writer (what runs inside chiaki-ng) and framegen/chiaki_tap.py agree on every byte: header
 fields, frame data, sizes, loss/recovered flags, the keyframe-request flag, the delay test's button press, the
-sound delay (and that it lapses without SmoovPlay's heartbeat), the game's sound for instant replay (data, format
+sound delay (and that it lapses without SmoovPlay's heartbeat), the game's sound ring (data, format
 and times, including a chunk split over several slots) and the end-of-stream marker. Uses a tap name of
 its own (CHIAKI_FRAMETAP_NAME), so it can run while chiaki-ng is streaming.
 """

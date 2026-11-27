@@ -149,8 +149,8 @@ frame.
 
 ## Sound (optional)
 
-SmoovPlay doesn't play the app's sound: the app plays its own. If the app also copies its sound into the sound
-ring (and sets feature 4), SmoovPlay's instant replay records it.
+SmoovPlay doesn't play the app's sound: the app plays its own. The layout also has a sound ring (feature 4), which
+chiaki-ng's writer fills; SmoovPlay doesn't read it (instant replay did, and is gone), so an app can leave it out.
 
 The ring is its own mapping, the name plus `-audio`, laid out as in [`frametap.h`](../chiaki_tap/frametap.h)
 ("Sound ring"):

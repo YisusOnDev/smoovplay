@@ -73,7 +73,7 @@ def queue_ticks(q: queue.Queue, what: str, why=None):
 
 
 class Sound(NamedTuple):
-    """A chunk of the game's sound, for instant replay (framegen/replay.py): what a source's read_sound() returns."""
+    """A chunk of the game's sound from the frame tap's sound ring (framegen.chiaki_tap.AudioTap)."""
     t: float  # perf_counter() when its first sample reached this PC
     pcm: bytes  # interleaved signed 16-bit samples
     rate: int
@@ -483,12 +483,9 @@ class GLWindowSink:
     does. vsync off presents immediately (lowest latency, may tear); on a G-Sync/FreeSync display vsync on lets
     VRR follow our frame timing instead of tearing. When the window is bigger than the frame it upscales: "fsr"
     with AMD FSR 1 (~0.1 ms GPU at 1440p), "vsr" with NVIDIA RTX Video Super Resolution (needs NVIDIA's package
-    or the RTX Video SDK, see framegen/rtxvsr.py, and frames on the GPU), "bilinear" with a plain filtered blit. A
-    look (framegen/looks.py, drawn by framegen/looks_gl.py) goes on after that, at the window's size.
+    or the RTX Video SDK, see framegen/rtxvsr.py, and frames on the GPU), "bilinear" with a plain filtered blit.
     Keys: m/Tab = settings menu (arrows + Enter in it, Esc back a page), i = interpolation on/off for this session, s = stats
-    overlay (off, minimal, detailed), f = fullscreen, u = next upscaler, k = look on/off, j = next look (Shift+J:
-    the one before), l = delay test (PS5 Remote Play), r = save the instant replay, b = save a before & after video
-    of it (framegen/replay.py), q/Esc = quit.
+    overlay (off, minimal, detailed), f = fullscreen, u = next upscaler, l = delay test (PS5 Remote Play), q/Esc = quit.
 
     restart_reasons(): labels of pending restart-only changes (the menu then offers "Restart now", which makes
     write() return "restart"). choices: {key: allowed values} for options the program can't use right now;
@@ -497,7 +494,7 @@ class GLWindowSink:
 
     hdr (settings "hdr" = HDR output, framegen/hdr.py): frames are HDR10 (float16 PQ BT.2020) and the window presents
     them through a 10-bit DXGI swap chain in HDR10's colour space, whatever "present" says; fullscreen is then a
-    borderless window over the monitor. Looks and RTX VSR are off. If that swap chain can't be made (no HDR display,
+    borderless window over the monitor. RTX VSR is off. If that swap chain can't be made (no HDR display,
     no NVIDIA interop), self.hdr10 is False and the window is the usual SDR one: the caller then sends SDR frames.
 
     With Windows' HDR on for the main display (KEEP_HDR), an SDR picture also goes through DXGI, an 8-bit swap chain,
@@ -624,21 +621,6 @@ class GLWindowSink:
               + " / ".join(self._name(m) for m in self.modes) + "; m opens the settings menu")
         self.timer = GpuTimer(GL)  # GPU time of the scale/draw step, reported on close
 
-        # Looks: which one is on (the settings, or the launcher's Looks page while it edits one) and its drawing.
-        from .looks import LookState
-        from .looks_gl import LookRenderer
-        self.looks = LookState(st)
-        self.look_gl = None
-        if self.hdr10:  # looks are made for SDR pictures
-            print("[display] Looks are off with HDR output")
-        else:
-            try:
-                self.look_gl = LookRenderer(GL, self.looks.library.lut)
-            except Exception as e:  # noqa: BLE001 - looks are optional
-                print(f"[display] Looks unavailable ({str(e)[:200]})")
-        self._frame_no = 0
-        self._bake = None  # instant replay with "Looks in clips": (texture, framebuffer, CudaGLReader)
-        self._bake_said = False
 
         self.choices, self.unavailable = dict(choices or {}), dict(unavailable or {})
         self.note_presentation()
@@ -960,10 +942,6 @@ class GLWindowSink:
             glfw.swap_interval(1 if st.vsync else 0)
         elif key in ("hz", "match_hz"):
             self._match_refresh()
-        elif key in ("look", "look_on"):
-            if not self.menu.open:
-                self.toast(f"Look: {self.looks.name() if st.look_on else 'Off'}")
-            return
         if not self.menu.open:  # a hotkey: say what it did
             from .settings import BY_KEY
             spec = BY_KEY[key]
@@ -1173,18 +1151,10 @@ class GLWindowSink:
             st.step("scaler", 1, self.allowed)
         elif key == glfw.KEY_Z:
             st.step("fill", 1, self.allowed)
-        elif key == glfw.KEY_K:
-            self.looks.toggle()
-        elif key == glfw.KEY_J:
-            self.looks.next(-1 if mods & glfw.MOD_SHIFT else 1)
         elif key == glfw.KEY_F:
             st.set("fullscreen", not st.fullscreen)
         elif key == glfw.KEY_L:
             self.cmd = "delay_test"  # the pipeline runs it (PS5 Remote Play only)
-        elif key == glfw.KEY_R:
-            self.cmd = "save_replay"  # instant replay (framegen/replay.py), through the pipeline
-        elif key == glfw.KEY_B:
-            self.cmd = "save_compare"
 
     # ---- drawing -------------------------------------------------------------
     def _layout(self) -> tuple[int, int, float, int, int, int, int]:
@@ -1284,7 +1254,7 @@ class GLWindowSink:
             GL.glBindFramebuffer(GL.GL_DRAW_FRAMEBUFFER, self._target())
             GL.glViewport(0, 0, fw, fh)
             GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-            self._plain(x0, y0, dw, dh)  # the last frame, plain (no upscaler or look)
+            self._plain(x0, y0, dw, dh)  # the last frame, plain (no upscaler)
             self._draw_ui(*visible(dw, dh, x0, y0, fw, fh))
             self._present()
         self.settle()
@@ -1331,22 +1301,8 @@ class GLWindowSink:
         if mode == "vsr" and not on_gpu:  # a CPU frame: VSR needs it on the GPU
             mode = "fsr" if self.fsr is not None else "bilinear"
         label = self._name(mode) if upscale else "no upscale"
-        self._frame_no += 1
-        plan = self.look_gl.plan(self.looks.current(), self.looks.rev) if self.look_gl is not None else None
         q = self.timer.begin()
-        if plan is not None:  # the upscaler draws into the look's input, and the look onto the screen
-            if upscale and mode == "fsr":
-                src, fbo = self.look_gl.input_target(dw, dh)
-                self.fsr.draw(self.tex, self.w, self.h, fbo, 0, 0, dw, dh)
-                flip_in = True  # (FSR draws upright)
-            elif upscale and mode == "vsr":
-                src, flip_in = self._vsr_render(dw, dh)[0], False
-            else:
-                src, flip_in = self.tex, False  # the look's first pass resizes it
-            self.look_gl.draw(plan, src, flip_in, target, x0, y0, dw, dh, True, self._frame_no)
-            GL.glViewport(0, 0, fw, fh)
-            label += " + look"
-        elif upscale and mode == "fsr":
+        if upscale and mode == "fsr":
             self.fsr.draw(self.tex, self.w, self.h, target, x0, y0, dw, dh)
             GL.glViewport(0, 0, fw, fh)
         elif upscale and mode == "vsr":
@@ -1462,59 +1418,8 @@ class GLWindowSink:
         x = x0 + dw - p.w - m if corner.endswith("right") else x0 + m
         p.blit(x, y0 + p.h + m if corner.startswith("bottom") else y0 + dh - m)
 
-    # ---- looks
-    def remote_commands(self) -> dict:
-        """The launcher's Looks page, through framegen/remote.py: `look-show <look JSON>` shows a look it's editing,
-        `look-hide` goes back to the settings' look, `looks-reload` reads the user's looks again after a change."""
-        import json
-
-        def show(text: str) -> None:
-            try:
-                self.looks.show(json.loads(text))
-            except ValueError as e:
-                print(f"[looks] can't show that look: {e}")
-
-        def reload(_text: str) -> None:
-            self.looks.reload()
-            if self.remote is not None:
-                self.remote.publish()  # the new list of looks
-
-        return {"look-show": show, "look-hide": lambda _text: self.looks.show(None), "looks-reload": reload}
-
-    def baked(self, frame):
-        """The frame just shown, with the look drawn on at the stream's size: for instant replay with "Looks in
-        clips" on (framegen/replay.py). Call right after write(), on its thread. The frame itself when no look is on,
-        or when the frames aren't on the graphics card (then it says so, once)."""
-        plan = self.look_gl.plan(self.looks.current(), self.looks.rev) if self.look_gl is not None else None
-        if plan is None:
-            return frame
-        if not (_is_cuda(frame) and self.interop is not None):
-            if not self._bake_said:
-                self._bake_said = True
-                print("[looks] Looks in clips needs the frames on the graphics card; clips are saved without it")
-                self.toast("Clips are saved without the look (it needs the frames on the graphics card)", 5.0)
-            return frame
-        import torch
-        GL = self.GL
-        if self._bake is None:
-            from .glcuda import CudaGLReader
-            tex = GL.glGenTextures(1)
-            GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
-            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, self.w, self.h, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None)
-            fbo = GL.glGenFramebuffers(1)
-            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
-            GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_2D, tex, 0)
-            self._bake = (tex, fbo, CudaGLReader(int(tex), self.w, self.h))
-        tex, fbo, reader = self._bake
-        self.look_gl.draw(plan, self.tex, False, fbo, 0, 0, self.w, self.h, False, self._frame_no, "bake")
-        GL.glViewport(0, 0, *self.glfw.get_framebuffer_size(self.win))
-        rgba = torch.empty((self.h, self.w, 4), dtype=torch.uint8, device=frame.device)
-        reader.read(rgba)
-        return rgba[..., [2, 1, 0]]  # BGR, like the frame
-
     def hide(self) -> None:
-        """Take the window off the screen now, before what's left of stopping (clips finishing saving): close()
-        follows."""
+        """Take the window off the screen now, before what's left of stopping: close() follows."""
         try:
             self.glfw.hide_window(self.win)
             self._events()
@@ -1548,13 +1453,6 @@ class GLWindowSink:
                       f"p95 {np.percentile(v, 95):.2f} ms (n={len(v)})")
         if self.fsr is not None:
             self.fsr.close()
-        if self._bake is not None:
-            self._bake[2].close()
-            self.GL.glDeleteFramebuffers(1, [self._bake[1]])
-            self.GL.glDeleteTextures([self._bake[0]])
-        if self.look_gl is not None:
-            self.look_gl.close()
-        self.looks.close()
         if self.interop is not None:
             self.interop.close()
         line = self.refresh.restore()  # (Windows would put it back anyway once SmoovPlay exits)
@@ -1569,8 +1467,7 @@ class GLWindowSink:
 
 class WindowSink:
     """OpenCV window (fallback; its GDI paint costs 5-12 ms/frame, too slow for 60 Hz on Windows).
-    Keys: i = toggle interpolation, s = stats overlay, f = fullscreen, r/b = save the instant replay (plain or
-    before & after), q/Esc = quit."""
+    Keys: i = toggle interpolation, s = stats overlay, f = fullscreen, q/Esc = quit."""
 
     NAME = "SmoovPlay"
 
@@ -1598,8 +1495,6 @@ class WindowSink:
             self.overlay = not self.overlay
         if k == ord("i"):
             return "toggle_interp"
-        if k in (ord("r"), ord("b")):
-            return "save_replay" if k == ord("r") else "save_compare"
         return None
 
     def close(self) -> None:

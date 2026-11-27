@@ -1,6 +1,5 @@
-"""120 fps: the pipeline shows the 1/4, 1/2 and 3/4 frames and the real one in that order, each made once, and
-instant replay keeps every other frame at 120 (60 fps clips) and every frame at 90. CPU only: a stand-in
-interpolator whose frames say which timestep they are, and the recorder without its encoder."""
+"""120 fps: the pipeline shows the 1/4, 1/2 and 3/4 frames and the real one in that order, each made once. CPU only:
+a stand-in interpolator whose frames say which timestep they are."""
 import time
 
 import numpy as np
@@ -46,23 +45,6 @@ class _Sink:
         self.shown.append(int(f[0, 0, 0]))
 
 
-class _Replay:
-    def __init__(self):
-        self.hz, self.n = [], 0
-
-    def set_output_hz(self, hz):
-        self.hz.append(hz)
-
-    def set_delay(self, ms):
-        pass
-
-    def frame(self, frame, t=None):
-        self.n += 1
-
-    def real_frame(self, frame, t):
-        pass
-
-
 def _pipeline(interp):
     p = Pipeline.__new__(Pipeline)  # no pinned memory: that would start CUDA
     from framegen import pipeline as pl
@@ -81,9 +63,9 @@ def _game(n=120):
 
 
 def test_120_fps_shows_each_quarter_once_and_in_order():
-    it, sink, replay = _Interp(), _Sink(), _Replay()
+    it, sink = _Interp(), _Sink()
     st = _pipeline(it).run(_game(), sink, label="RIFE",
-                           settings=Settings({"hz": 120, "even_out": False, "overlay": False}), replay=replay)
+                           settings=Settings({"hz": 120, "even_out": False, "overlay": False}))
     assert st.quarter_shown > 40 and st.quarter_skipped == 0
     shown = sink.shown
     first = shown.index(AI + 1)
@@ -93,32 +75,9 @@ def test_120_fps_shows_each_quarter_once_and_in_order():
         assert steady[k + 3] < AI
     assert set(it.single) == {0.25, 0.5, 0.75}
     assert it.single.count(0.25) == it.single.count(0.5) == it.single.count(0.75)  # each once a pair
-    assert replay.hz == [120] and replay.n == len(shown)  # (the recorder itself keeps every other one)
 
 
 def test_90_fps_is_unchanged():
     it, sink = _Interp(), _Sink()
     _pipeline(it).run(_game(), sink, label="RIFE", settings=Settings({"hz": 90, "even_out": False, "overlay": False}))
     assert set(it.single) == {1 / 3, 2 / 3}
-
-
-def test_replay_keeps_every_other_frame_at_120_and_all_at_90():
-    from framegen.replay import Recorder
-    rec = Recorder(0, device="cpu")
-    kept = []
-    rec._put = lambda name, frame, t: kept.append(t)
-    rec.length = 60  # (as if on; nothing reaches the encoder: _put is the stand-in)
-    try:
-        for hz, want in ((90, 90), (120, 60)):
-            kept.clear()
-            rec._after_last = None
-            rec.set_output_hz(hz)
-            for i in range(hz):  # a second of frames, with a little jitter
-                rec.frame(None, i / hz + (0.0015 if i % 3 == 0 else -0.001))
-            assert len(kept) == want, hz
-            if hz == 120:
-                gaps = np.diff(kept)
-                assert gaps.min() > 0.013 and gaps.max() < 0.02  # evenly spaced, about 1/60 s
-    finally:
-        rec.length = 0
-        rec.close() if hasattr(rec, "close") else None

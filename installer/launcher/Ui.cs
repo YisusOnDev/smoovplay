@@ -312,11 +312,6 @@ namespace SmoovPlay
             // settings page
             Click("BtnSetRestart", RestartFromSettings);
             Click("BtnDetect", RunDetect);
-
-            // looks page
-            Click("BtnLookNew", NewLook);
-            Click("BtnLookPaste", PasteLookCode);
-            WireLookPreview();
             E("SetScroll").SizeChanged += (s, e) => LayoutSections(false);
 
             // help page
@@ -350,7 +345,7 @@ namespace SmoovPlay
             // rail navigation (launcher)
             foreach (var pair in new[] { Tuple.Create("NavPlay", "PagePlay"), Tuple.Create("NavGuide", "PageGuide"),
                                          Tuple.Create("NavCheck", "PageCheck"), Tuple.Create("NavSettings", "PageSettings"),
-                                         Tuple.Create("NavLooks", "PageLooks"), Tuple.Create("NavHelp", "PageHelp") })
+                                         Tuple.Create("NavHelp", "PageHelp") })
             {
                 var target = pair.Item2;
                 E<RadioButton>(pair.Item1).Checked += (s, e) => { if (!navigating) OnNav(target); };
@@ -362,11 +357,10 @@ namespace SmoovPlay
         // ------------------------------------------------------------------------------------------- pages
         void ShowPage(string name)
         {
-            foreach (var p in new[] { "PageCheck", "PageLocation", "PageInstall", "PageDone", "PagePlay", "PageGuide", "PageSettings", "PageLooks", "PageHelp" })
+            foreach (var p in new[] { "PageCheck", "PageLocation", "PageInstall", "PageDone", "PagePlay", "PageGuide", "PageSettings", "PageHelp" })
                 if (p != name) Show(E(p), false);
             var el = E(name);
             bool changed = page != name;
-            if (changed && page == "PageLooks") OnLooksLeave();
             page = name;
             Show(el, true);
             if (changed)
@@ -387,7 +381,7 @@ namespace SmoovPlay
             try
             {
                 string nav = name == "PagePlay" ? "NavPlay" : name == "PageGuide" ? "NavGuide" : name == "PageCheck" ? "NavCheck"
-                    : name == "PageSettings" ? "NavSettings" : name == "PageLooks" ? "NavLooks" : name == "PageHelp" ? "NavHelp" : null;
+                    : name == "PageSettings" ? "NavSettings" : name == "PageHelp" ? "NavHelp" : null;
                 if (nav != null) E<RadioButton>(nav).IsChecked = true;
             }
             finally { navigating = false; }
@@ -400,13 +394,12 @@ namespace SmoovPlay
             if (name == "PagePlay") BuildChips();
             if (name == "PageGuide") BuildGuide();
             if (name == "PageSettings") { ShowSettings(); return; }
-            if (name == "PageLooks") { ShowLooks(); return; }
             ShowPage(name);
         }
 
         void SetNavEnabled(bool on)
         {
-            foreach (var n in new[] { "NavPlay", "NavGuide", "NavCheck", "NavSettings", "NavLooks", "NavHelp" }) E(n).IsEnabled = on;
+            foreach (var n in new[] { "NavPlay", "NavGuide", "NavCheck", "NavSettings", "NavHelp" }) E(n).IsEnabled = on;
         }
 
         // ---- the setup stepper in the rail
@@ -501,14 +494,14 @@ namespace SmoovPlay
             Show(E("Stepper"), true);
             Show(E("Nav"), false);
             T("RailFooterTitle").Text = "Updating SmoovPlay";
-            T("RailFooterText").Text = "Your settings, looks and clips stay. Only parts this version changes are downloaded again.";
+            T("RailFooterText").Text = "Your settings stay. Only parts this version changes are downloaded again.";
             BuildStepper();
             SetStep(2);
             E<TextBox>("DirBox").Text = paths.Install;
             E<CheckBox>("ToggleDesktop").IsChecked = File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "SmoovPlay.lnk"));
             T("InstallOverline").Text = "UPDATING TO " + V(BuildInfo.Version);
             T("InstallTitle").Text = "Updating SmoovPlay";
-            T("InstallSub").Text = "A minute or two. SmoovPlay opens again when it's done, with your settings, looks and clips.";
+            T("InstallSub").Text = "A minute or two. SmoovPlay opens again when it's done, with your settings.";
             ShowPage("PageInstall");
             int wait = opts.Wait;
             Task.Run(() =>
@@ -578,7 +571,6 @@ namespace SmoovPlay
             if (!paths.Dev) Task.Run(() => Updater.CleanUp());  // an update this one came from
             UpdateCheck.Start((tag, url) => Window.Dispatcher.BeginInvoke(new Action(() => ShowUpdate(tag, url))));
             Show(B("RailCheck"), GitHub.Repo != null);
-            WatchSaving();  // before & after videos a session left being made, even before this launcher opened
             B("HelpRepair").IsEnabled = !paths.Dev;
             B("HelpUninstall").IsEnabled = !paths.Dev;
             T("CheckOverline").Text = "PC CHECK";
@@ -594,7 +586,7 @@ namespace SmoovPlay
             string want = opts.Page;
             if (want == null) want = prefs.Contains("guide-seen") ? "play" : "guide";
             if (!prefs.Contains("guide-seen")) { prefs.Add("guide-seen"); Prefs.Save(prefs); }
-            Nav(want == "guide" ? "PageGuide" : want == "check" ? "PageCheck" : want == "settings" ? "PageSettings" : want == "looks" ? "PageLooks" : want == "help" ? "PageHelp" : "PagePlay");
+            Nav(want == "guide" ? "PageGuide" : want == "check" ? "PageCheck" : want == "settings" ? "PageSettings" : want == "help" ? "PageHelp" : "PagePlay");
         }
 
         /// <summary>An install whose downloads never finished (or were removed): check, then finish.</summary>
@@ -1824,7 +1816,6 @@ namespace SmoovPlay
             if (over && changed) { liveState = null; restartSent = false; BuildChips(); }
             if (over && changed && detectAfterPlay && !detecting) { detectAfterPlay = false; RunDetect(); }  // (Vfg.cs)
             RefreshSettings();
-            OnLooksState();
             UpdateTaskbar(st, title);
             Show(B("BtnPlayTest"), !running && source.TestMode);
             // A session that tested something (this button, or the video window's "Simulate a 30 fps game") left a report.
@@ -2117,7 +2108,7 @@ namespace SmoovPlay
             if (session != null && session.Running) { Toast("Stop playing first", true); return; }
             Ask("\uE90F", "Accent", "Repair SmoovPlay",
                 "A quick repair checks every part and puts back anything missing (a few minutes). A full repair downloads everything again (about 5 GB).",
-                "Quick repair", "Full repair", "Cancel", r => { if (r == 1 || r == 2) UnlessSaving("Repairing", () => StartInstall(false, r == 2)); });
+                "Quick repair", "Full repair", "Cancel", r => { if (r == 1 || r == 2) StartInstall(false, r == 2); });
         }
 
         /// <summary>The "Update available" link: install it from here (Updater), or open the release page for a copy
@@ -2130,10 +2121,10 @@ namespace SmoovPlay
             bool chiaki = Updater.ChiakiInInstall(paths).Length > 0;
             Ask("\uE896", "Accent", "Update to " + V(updateTag) + "?",
                 "SmoovPlay downloads it (about 140 MB), closes, updates in a minute or two and opens again. " +
-                "Your settings, looks and clips stay." + (chiaki ? " chiaki-ng closes too, since it's updated with it." : ""),
+                "Your settings stay." + (chiaki ? " chiaki-ng closes too, since it's updated with it." : ""),
                 "Update now", "What's new", "Later", r =>
                 {
-                    if (r == 1) UnlessSaving("Updating", RunUpdate);
+                    if (r == 1) RunUpdate();
                     else if (r == 2) Proc.Open(updateUrl);
                 });
         }
@@ -2206,100 +2197,27 @@ namespace SmoovPlay
                 "Uninstall", null, "Cancel", r =>
                 {
                     if (r != 1) return;
-                    UnlessSaving("Uninstalling", () =>
+                    try
                     {
-                        try
-                        {
-                            Process.Start(new ProcessStartInfo(Path.Combine(paths.Install, "SmoovPlay.exe"), "--uninstall --yes") { WorkingDirectory = Path.GetTempPath() });
-                            allowClose = true;
-                            Window.Close();
-                        }
-                        catch (Exception e) { Toast("Couldn't start the uninstaller: " + e.Message, true); }
-                    });
+                        Process.Start(new ProcessStartInfo(Path.Combine(paths.Install, "SmoovPlay.exe"), "--uninstall --yes") { WorkingDirectory = Path.GetTempPath() });
+                        allowClose = true;
+                        Window.Close();
+                    }
+                    catch (Exception e) { Toast("Couldn't start the uninstaller: " + e.Message, true); }
                 });
         }
 
-        // ------------------------------------------------------------------------------------------- saving
-        // Before & after videos carry on in their own process once play stops (Saving). Closing the launcher leaves
-        // them be; updating, repairing and uninstalling would stop them, so those ask first.
-        DispatcherTimer savingTimer;
-        readonly Dictionary<int, string> savingKnown = new Dictionary<int, string>();  // being made: process id -> video
+        // ------------------------------------------------------------------------------------------- after a session
         bool closeWhenStopped;
 
-        /// <summary>A session has ended: close, if that was asked for while it was stopping; otherwise say how any
-        /// before & after videos it left being made get on.</summary>
+        /// <summary>A session has ended: close, if that was asked for while it was stopping.</summary>
         void AfterSession()
         {
             if (closeWhenStopped)
             {
                 allowClose = true;
                 Window.Close();
-                return;
             }
-            WatchSaving();
-        }
-
-        void WatchSaving()
-        {
-            if (savingTimer == null)
-            {
-                savingTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-                savingTimer.Tick += (s, e) => CheckSaving();
-            }
-            savingTimer.Start();
-            CheckSaving();
-        }
-
-        void CheckSaving()
-        {
-            if (session != null && session.Running) { savingTimer.Stop(); return; }  // a session reports its own
-            var all = Saving.Read();
-            foreach (var v in all.Where(x => !x.Running))
-            {
-                if (v.Failed != null) Toast("Couldn't make the before & after video: " + Shorten(v.Failed, 140), true);
-                else if (!File.Exists(v.Out)) Toast("The before & after video was stopped before it was finished", true);
-                savingKnown.Remove(v.Pid);
-                Saving.Forget(v);
-            }
-            // Finished: it tidies its file away itself.
-            var done = savingKnown.Where(k => !all.Any(v => v.Pid == k.Key)).ToList();
-            foreach (var k in done) savingKnown.Remove(k.Key);
-            var saved = done.Select(k => k.Value).Where(File.Exists).ToList();
-            if (saved.Count > 0)
-            {
-                string last = saved[saved.Count - 1];
-                Toast("Saved " + (saved.Count == 1 ? "the before & after video: " + Path.GetFileName(last) : saved.Count + " before & after videos"),
-                    false, "Show", () => ShowFile(last));
-            }
-            var started = all.Where(v => v.Running && !savingKnown.ContainsKey(v.Pid)).ToList();
-            foreach (var v in started) savingKnown[v.Pid] = v.Out;
-            if (started.Count > 0)
-                Toast((started.Count == 1 ? "A before & after video is" : started.Count + " before & after videos are")
-                    + " being made, usually for a minute or two. It carries on if you close SmoovPlay.", false);
-            if (savingKnown.Count == 0) savingTimer.Stop();
-        }
-
-        static void ShowFile(string path)
-        {
-            try { Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + path + "\"") { UseShellExecute = false }); } catch (Exception) { }
-        }
-
-        /// <summary>Runs go, after asking first if a before & after video is still being made, which `doing`
-        /// ("Updating") would stop.</summary>
-        void UnlessSaving(string doing, Action go)
-        {
-            var making = Saving.Read().Where(v => v.Running).ToList();
-            if (making.Count == 0) { go(); return; }
-            Ask("", "Warn", making.Count == 1 ? "A video is still being saved" : "Videos are still being saved",
-                (making.Count == 1 ? "A before & after video is" : making.Count + " before & after videos are")
-                + " still being made, usually for a minute or two more. " + doing + " now stops it, and it won't be saved.",
-                doing + " anyway", null, "Wait", r =>
-                {
-                    if (r != 1) return;
-                    Saving.Stop(making);
-                    foreach (var v in making) savingKnown.Remove(v.Pid);
-                    go();
-                });
         }
 
         // ------------------------------------------------------------------------------------------- dialog, toast
@@ -2449,7 +2367,7 @@ namespace SmoovPlay
                 Ask("\uE768", "Accent", "SmoovPlay is running", "Stop it and close? chiaki-ng stays open.", "Stop and close", null, "Keep playing", r =>
                 {
                     if (r != 1) return;
-                    // Closes once the session has gone: it finishes a clip being saved first (a second or two).
+                    // Closes once the session has gone.
                     closeWhenStopped = true;
                     var s = session;
                     s.Stop();

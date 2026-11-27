@@ -4,11 +4,8 @@ The launcher writes one command per line to our stdin:
 
     set <key> <json value>    change a setting and save it, as if it were picked in the video window's menu
     restart                   apply restart-only settings now (the menu's "Restart now")
-    quit                      stop, as Esc in the video window does (clips being saved are finished first)
+    quit                      stop, as Esc in the video window does
     state                   print the current state again
-    look-show <look JSON>     show this look (the Looks page is editing it), whatever the Look settings say
-    look-hide                 back to the Look settings' look
-    looks-reload              the user's looks changed on disk: read them again (the list of looks is in the state)
 
 and reads a `[settings-state] {json}` line on our stdout at the start of every session and after every change,
 whoever made it (this link, the menu or a hotkey): the current values, which choices can be picked right now,
@@ -34,11 +31,9 @@ class Remote:
 
     def __init__(self, settings: Settings, allowed: Callable[[str, object], bool],
                  disabled: Callable[[str], str | None], restart_reasons: Callable[[], list[str]],
-                 commands: TextIO | None = None, out: TextIO | None = None,
-                 handlers: dict[str, Callable[[str], None]] | None = None) -> None:
+                 commands: TextIO | None = None, out: TextIO | None = None) -> None:
         self.settings, self.allowed, self.disabled, self.restart_reasons = settings, allowed, disabled, restart_reasons
         self._out = out
-        self.handlers = dict(handlers or {})  # more commands: name -> fn(the rest of the line), e.g. the looks'
         self._q: queue.Queue[str] = queue.Queue()
         threading.Thread(target=self._read, args=(commands or sys.stdin,), name="remote", daemon=True).start()
         settings.watch(lambda key: self.publish())
@@ -68,11 +63,6 @@ class Remote:
             elif cmd == "set":
                 key, _, text = rest.partition(" ")
                 self._set(key, text)
-            elif cmd in self.handlers:
-                try:
-                    self.handlers[cmd](rest)
-                except Exception as e:  # noqa: BLE001 - a bad command must never take the video down
-                    print(f"[remote] {cmd} failed: {str(e)[:200]}")
             else:
                 print(f"[remote] unknown command: {line[:80]}")
 

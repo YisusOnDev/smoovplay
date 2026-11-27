@@ -120,20 +120,9 @@ def test_sdr_stream_to_pq16_is_sdr_white():
     assert sdr[0, 0].tolist() == [255, 255, 255]
 
 
-def test_replay_matches_window():
-    """pq16_to_sdr8 (instant replay while the window shows HDR) gives what "sdr" shows, within a level."""
-    rng = np.random.default_rng(1)
-    y = torch.from_numpy(rng.uniform(64, 940, (8, 8)))
-    u = torch.from_numpy(rng.uniform(300, 700, (4, 4)))
-    v = torch.from_numpy(rng.uniform(300, 700, (4, 4)))
-    direct = hdr.convert_yuv(y, u, v, PQ, "sdr8").int()
-    via = hdr.pq16_to_sdr8(hdr.convert_yuv(y, u, v, PQ, "pq16")).int()
-    assert (direct - via).abs().max() <= 2
-
-
 @pytest.mark.parametrize("grey", [True, False])
 def test_luts_match_the_maths(grey):
-    """The 3D LUTs that run on every frame (StreamConverter.convert, pq16_to_sdr8) against the per-pixel maths, on
+    """The 3D LUTs that run on every frame (StreamConverter.convert) against the per-pixel maths, on
     random pixels: near grey (as most of a game's are) or any colour at all (the worst case)."""
     rng = np.random.default_rng(2)
     lo, hi = (470, 554) if grey else (64, 960)
@@ -142,9 +131,6 @@ def test_luts_match_the_maths(grey):
     lut = hdr.StreamConverter("sdr8", device="cpu").convert(y.float(), u.float(), v.float(), PQ)
     d = (lut.int() - hdr.convert_yuv(y, u, v, PQ, "sdr8").int()).abs().float()
     assert d.mean() < 0.3 and d.quantile(0.99) <= 4 and (d.max() <= 6 or not grey)
-    pq = hdr.convert_yuv(y, u, v, PQ, "pq16")
-    r = (hdr.pq16_to_sdr8(pq).int() - hdr.pq16_to_sdr8_exact(pq).int()).abs().float()
-    assert r.mean() < 0.1 and r.quantile(0.99) <= 1
     for peak in (400.0, 600.0):  # HDR10 to a display dimmer than the game's highlights: rolled off
         got = hdr.StreamConverter("pq16", device="cpu", display_peak=peak).convert(y.float(), u.float(), v.float(), PQ)
         e = (got.double() - hdr.convert_yuv(y, u, v, PQ, "pq16", display_peak=peak).double()).abs() * 1023
@@ -307,18 +293,3 @@ def test_vfg_packs_hdr_frames_in_10_bits():
     assert int(packed[0, 0]) == 1023 | (512 << 10) | (0 << 20)  # R=1.0 B=0.0 (0.5 rounds to 512 of 1023)
     back = unpack_rgb10a2(packed, hdr=True)
     assert back.dtype == torch.float16 and (back.float() - v.float()).abs().max() <= 0.5 / 1023 + 1e-3
-
-
-def test_replay_turns_hdr_frames_into_sdr():
-    from framegen.replay import Recorder
-    r = Recorder.__new__(Recorder)  # only _put's conversion: no encoders
-    seen = []
-    r._zero = lambda t: None
-    r._convert = lambda name, frame: seen.append(frame) or None
-    r._warn = lambda *a: None
-    r.hdr_to_sdr = hdr.pq16_to_sdr8
-    try:
-        r._put("after", torch.full((4, 4, 3), hdr.pq_of_nits(203), dtype=torch.float16), 0.0)
-    except Exception:  # (whatever _put does after converting needs a real Recorder)
-        pass
-    assert seen and seen[0].dtype == torch.uint8 and 200 <= int(seen[0][0, 0, 0]) <= 240

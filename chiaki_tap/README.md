@@ -105,14 +105,13 @@ which ones this chiaki-ng understands):
   delays its sound by as much, 0–500 ms. If the pipeline stops (its heartbeat is over 2 s old), the delay drops
   to 0 by itself, so chiaki-ng on its own never plays late sound.
 
-## The game's sound, for instant replay
+## The game's sound ring
 
 chiaki-ng also copies the game's sound, as it arrives and before its own volume, into a second shared-memory ring
 (`<tap name>-audio`: 512 slots of up to 8 KB of 16-bit PCM, each with its arrival time; layout in `frametap.h`).
 A chunk too big for one slot is split by whole samples, each part timed by the samples before it. The header's
-`features` gains a bit for it, so SmoovPlay knows a chiaki-ng from before this ring (whose instant replays are
-silent). Instant replay (`framegen/replay.py`) reads it every 20 ms and times the sound by SmoovPlay's delay, so
-it meets the picture.
+`features` gains a bit for it. SmoovPlay's pipeline doesn't read it (instant replay did, and is gone); the writer
+is left as it is, and `selftest.py` still checks it.
 
 `CHIAKI_FRAMETAP_NAME` gives the tap another shared-memory name (the self-test uses it).
 

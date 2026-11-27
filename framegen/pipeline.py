@@ -389,7 +389,7 @@ class Pipeline:
         self.waiting = None  # the source's Waiting while no frame is coming, else None (the watchdog reads it too)
 
     def run(self, source, sink=None, enabled: bool = True, score: bool = False, label: str = "",
-            on_tick=None, hz: int = 60, settings=None, gt=None, remote=None, replay=None) -> Stats:
+            on_tick=None, hz: int = 60, settings=None, gt=None, remote=None) -> Stats:
         """on_tick(tick, diff, action, proc_ms, t_start), if given, is called after each tick is processed.
         remote: the source, when it can press a button for the delay test (L: PS5 Remote Play's chiaki-ng,
         framegen.chiaki_tap.ChiakiSource) or hold its sound back to meet the picture (settings.audio_sync: chiaki-ng,
@@ -398,8 +398,6 @@ class Pipeline:
         is an iterator over the real source, which doesn't have it).
         settings (framegen.settings.Settings): if given, its `interp` and `hz` are followed live instead of
         `enabled` and `hz`.
-        replay (framegen.replay.Recorder): instant replay. It gets every frame shown, each new frame from the game
-        and the pipeline's delay, and the window's R and B keys save it.
 
         hz=120 or 90 (needs a sink): more generated frames per 30 fps frame, shown at least 1/hz apart.
           120: a new frame B after A shows A->B at 1/4 then 1/2; its repeat tick shows 3/4 then B.
@@ -431,8 +429,6 @@ class Pipeline:
         gt = gt or getattr(source, "gt", None)
         gt_fn = gt if scoring else None
         st.hz_used.add(hz)
-        if replay is not None and hasattr(replay, "set_output_hz"):
-            replay.set_output_hz(hz)
         key_gpu: torch.Tensor | None = None  # GPU copy of key_frame, for scoring
         # A sink that takes CUDA tensors (the GL window with CUDA-GL interop) gets generated frames without a
         # GPU->CPU->GPU round trip; otherwise they're downloaded into pinned memory as before.
@@ -457,7 +453,6 @@ class Pipeline:
         dip_watch, dipping = DipWatch(), False
         reached: tuple = ()  # timed: the frames whose time came with the frame about to be shown
         audio_next, audio_ms = 0.0, None  # when the sound delay is next looked at, and what chiaki-ng was last told
-        replay_next = 0.0  # when instant replay is next told the delay
         rhythm, rhythm_moves, rhythm_note = None, 0, 0.0  # Game frame rate 30 fps: the lock, its moves, next note
         off_since: float | None = None  # since when the game has been off the rate that's needed
         note, toasted = "", set()
@@ -548,8 +543,6 @@ class Pipeline:
                 if want_hz != hz:
                     hz, gap, quarter_due, ov_next = want_hz, 0.95 / want_hz, False, 0.0
                     st.hz_used.add(hz)
-                    if replay is not None and hasattr(replay, "set_output_hz"):
-                        replay.set_output_hz(hz)
                     print(f"[pipeline] output {hz} Hz")
                 if (score or settings.simulate_30) != scoring:
                     scoring = not scoring
@@ -644,10 +637,6 @@ class Pipeline:
                         print("[pipeline] sound no longer held back (Sound in sync is off)")
                     remote.set_audio_delay(want)
                     audio_ms = want
-            # Instant replay times the game's own frames and its sound by the same delay, to line up with the picture.
-            if replay is not None and t0 >= replay_next and st.real_delay_ms:
-                replay_next = t0 + 2.0
-                replay.set_delay(float(np.median(st.real_delay_ms[-120:])))
 
             if tick.truth_new is not None:
                 st.dedup[("t" if is_new == tick.truth_new else "f") + ("p" if is_new else "n")] += 1
@@ -680,10 +669,7 @@ class Pipeline:
                         time.sleep(next_due - now)
                     next_due = max(next_due, now) + gap
                 cmd = (sink.write(frame, text, ideal=tick_at + at * TICK) if ideal_out else sink.write(frame, text))
-                t_now = time.perf_counter()
-                shown_rate.add(t_now)
-                if replay is not None:
-                    replay.frame(frame, t_now)  # after it's on screen, so it adds no delay
+                shown_rate.add(time.perf_counter())
                 return cmd
 
             def show_early(t: float) -> bool:
@@ -873,9 +859,6 @@ class Pipeline:
                 st.real_delay_ms.append((t_shown - unshown) * 1000)
                 unshown = None
 
-            if replay is not None and is_new:  # the game's own frame, for a before & after video
-                replay.real_frame(tick.frame, tick.t_arrival)
-
             if to_score is not None:
                 self._score(st, tick, prev_key, *to_score, gt_fn, keep_worst=score)
                 st.score_ms.append((time.perf_counter() - t_shown) * 1000)
@@ -896,11 +879,6 @@ class Pipeline:
                         delay_test, test_mark, ov_next = delaytest.DelayTest(remote.press, remote.press_sent), len(
                             st.real_delay_ms), 0.0
                         print("[pipeline] delay test started")
-                if cmd in ("save_replay", "save_compare"):  # R and B
-                    if replay is not None:
-                        replay.save("compare" if cmd == "save_compare" else None)
-                    elif hasattr(sink, "toast"):
-                        sink.toast("Instant replay isn't available here", 4.0)
                 if cmd == "toggle_interp":  # the OpenCV window's i key (the GL window changes settings itself)
                     if settings is not None:
                         settings.override("interp", not settings.interp)  # picked up at the next tick

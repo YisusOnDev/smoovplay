@@ -31,7 +31,6 @@ namespace SmoovPlay
 
         // Windows' own, or keys people need to get out of things
         static readonly HashSet<string> Reserved = new HashSet<string> { "Ctrl+Alt+Delete", "Ctrl+Shift+Esc", "Alt+Tab", "Alt+Esc", "Alt+F4", "Ctrl+Alt+Tab", "Win+L", "Win+D", "Win+Tab", "Ctrl+Esc" };
-        static readonly Dictionary<string, string> Own = new Dictionary<string, string> { { "Ctrl+Alt+R", "saving a replay" }, { "Ctrl+Alt+B", "saving a before & after" } };
 
         // names as framegen/hotkeys.py writes them, by Windows' virtual-key code
         static readonly Dictionary<int, string> Names = BuildNames();
@@ -190,7 +189,6 @@ namespace SmoovPlay
             if ((mods & (ModCtrl | ModAlt | ModWin)) == 0)
                 return "Add Ctrl, Alt or Win: on its own (or with Shift only), the key would stop working in the game and the app.";
             if (Reserved.Contains(name)) return name + " belongs to Windows.";
-            if (Own.ContainsKey(name)) return name + " is SmoovPlay's own, for " + Own[name] + ".";
             var others = Resolve(prefs, null).Where(kv => kv.Key != action && kv.Value == name).Select(kv => Find(kv.Key).Label).FirstOrDefault();
             if (others != null) return others + " already uses " + name + ". Change that one first.";
             if (!Free(name)) return "Another program on this PC already uses " + name + ". Pick another.";

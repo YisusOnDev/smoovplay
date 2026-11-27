@@ -614,8 +614,7 @@ def main() -> int:
         unavailable["hdr"] = "Only used with PS5 Remote Play."
     elif dml_mode:
         unavailable["hdr"] = "Not without an NVIDIA card yet."
-    hdr10_rows = {k: "Not with HDR output yet." for k in ("look_on", "look", "look_clips")}
-    hdr10_rows["present"] = "HDR output always uses the low-delay presentation."
+    hdr10_rows = {"present": "HDR output always uses the low-delay presentation."}
     if hdr10[0]:
         unavailable.update(hdr10_rows)
     if a.scale is not None:
@@ -659,8 +658,7 @@ def main() -> int:
     remote = None
     if a.control and isinstance(window, GLWindowSink):
         from framegen.remote import Remote
-        window.remote = remote = Remote(settings, window.allowed, window.disabled, restart_reasons,
-                                        handlers=window.remote_commands())
+        window.remote = remote = Remote(settings, window.allowed, window.disabled, restart_reasons)
 
     hidden: list[int] = []
 
@@ -696,34 +694,6 @@ def main() -> int:
     minimize_chiaki()
     if isinstance(window, GLWindowSink):
         window.settle_hook = keep_chiaki_down
-
-    # Instant replay (framegen/replay.py): only while playing on screen. It lasts across restarts, so a restart for a
-    # setting doesn't lose what's held.
-    replay = None
-    if sink.sinks:
-        from framegen.replay import SAVING_DIR, Recorder
-        replay = Recorder(settings.replay, clip=settings.replay_save, layout=settings.replay_layout,
-                          notify=getattr(sink, "toast", None), hotkeys=True, size=(src.w, src.h),
-                          mark_dir=SAVING_DIR)
-        replay.warm_up()  # its encoders open now, not during play
-        if hdr10[0]:  # clips are SDR: HDR10 frames are tone-mapped as they go in, as "shown in SDR" would show them
-            from framegen.hdr import pq16_to_sdr8
-            replay.hdr_to_sdr = pq16_to_sdr8
-        if hasattr(src, "read_sound"):
-            replay.attach_sound(src.read_sound)
-
-        def replay_settings(key: str = "look_clips") -> None:
-            if key == "replay":
-                replay.set_length(settings.replay)
-            elif key == "replay_save":
-                replay.clip = settings.replay_save
-            elif key == "replay_layout":
-                replay.layout = settings.replay_layout
-            elif key == "look_clips":  # the look in the SmoovPlay video too, drawn by the window at the stream's size
-                replay.look = window.baked if settings.look_clips and isinstance(window, GLWindowSink) else None
-
-        settings.watch(replay_settings)
-        replay_settings()
 
     # --results: rewritten every 10 s while playing (the launcher's Stop ends the process without warning) and at
     # the end. `done` holds finished sessions; `live` the running Pipeline (dropped before a restart frees its GPU
@@ -818,8 +788,7 @@ def main() -> int:
             stats = pipe.run(ticks, sink if sink.sinks else None, score=a.score, label=label,
                              on_tick=getattr(src, "log_tick", None), settings=settings,
                              gt=test.gt if test is not None else getattr(src, "gt", None),
-                             remote=src if kind in ("chiaki", "capture") and hasattr(src, "can_press") else None,
-                             replay=replay)
+                             remote=src if kind in ("chiaki", "capture") and hasattr(src, "can_press") else None)
             live[:] = [None, None]  # first, so a report written meanwhile never counts this session twice
             if a.results:
                 done.append((cfg, stats))
@@ -847,12 +816,11 @@ def main() -> int:
             if hasattr(src, "hold"):
                 src.hold(False)
     finally:
-        # The video window goes at once: a window left up while clips finish saving looks frozen (and Windows
-        # offers to end it, which stops the save).
+        # The video window goes at once: a window left up while the rest stops looks frozen.
         for s in getattr(sink, "sinks", [sink]):
             if hasattr(s, "hide"):
                 s.hide()
-        if sink.sinks:  # the screen can turn off again, while clips finish saving
+        if sink.sinks:  # the screen can turn off again
             from framegen.winutil import keep_screen_on
             keep_screen_on(False)
         if kind == "chiaki" and hasattr(src, "set_audio_delay"):
@@ -860,8 +828,6 @@ def main() -> int:
         if hidden:
             from framegen.winutil import SW_RESTORE, show
             show(hidden, SW_RESTORE)
-        if replay is not None:
-            replay.close(wait_saves=30)  # a clip being saved is finished first; before & after carries on alone
         sink.close()
         src.close()
         stop_results.set()

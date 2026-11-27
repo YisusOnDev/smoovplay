@@ -31,7 +31,6 @@ import re
 import sys
 import threading
 import time
-from collections import deque
 from dataclasses import asdict, dataclass
 
 import numpy as np
@@ -472,7 +471,6 @@ class CardSource:
         self.astream = container.streams.audio[0] if audio is not None and container.streams.audio else None
         self._audio_out, self.player, self._resampler = audio, None, None
         self._audio_wait: list = []  # a file's sound, held until the picture gets to it: (time, pcm)
-        self._replay_sound: deque = deque(maxlen=2000)  # the sound as it's played, for instant replay (read_sound)
         # How late each stream arrives after its own timestamps (the same clock in one DirectShow graph), so the
         # sound can be held back by the picture's delay less however much later it already comes.
         self._late_v: list[float] = []
@@ -747,9 +745,9 @@ class CardSource:
                 self._audio_wait.append((fr.time if fr.time is not None else 0.0, pcm))
 
     def _play(self, pcm: bytes) -> None:
-        from .io import Sound
-        # Timed like the picture it goes with: a card's sound comes this much later than its picture.
-        self._replay_sound.append(Sound(time.perf_counter() - self.sound_late_s(), pcm, self._rate, self._channels))
+        # How much later the card's sound comes than its picture, measured as soon as there are enough packets of
+        # each, so it's from the start of the session (sound_late_raw_s)
+        self.sound_late_raw_s()
         if self._audio_out is None:
             return
         if self.player is None:
@@ -807,13 +805,6 @@ class CardSource:
     _sound_report_t = 0.0
     _sound_seen: dict | None = None
     _rate, _channels = 48000, 2
-
-    def read_sound(self) -> list:
-        """The sound played since the last call (framegen.io.Sound chunks), for instant replay."""
-        out = []
-        while self._replay_sound:
-            out.append(self._replay_sound.popleft())
-        return out
 
     def sound_lates(self) -> tuple[float, float] | None:
         """(median lateness of the sound, of the picture), each against its own timestamps; None until known."""

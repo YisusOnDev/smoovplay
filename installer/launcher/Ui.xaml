@@ -432,73 +432,6 @@
       </Setter>
     </Style>
 
-    <!-- sliders on the Looks page (LooksPage.cs): a thin track, filled up to a round knob -->
-    <Style x:Key="SlideRepeat" TargetType="RepeatButton">
-      <Setter Property="Focusable" Value="False"/>
-      <Setter Property="IsTabStop" Value="False"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-    <Style x:Key="SlideFill" TargetType="RepeatButton">
-      <Setter Property="Focusable" Value="False"/>
-      <Setter Property="IsTabStop" Value="False"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="RepeatButton">
-            <Grid Background="Transparent">
-              <Border Height="4" CornerRadius="2" Background="{StaticResource AccentGradH}" VerticalAlignment="Center"/>
-            </Grid>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-    <Style x:Key="SlideThumb" TargetType="Thumb">
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Thumb">
-            <Grid Width="18" Height="18" Background="Transparent">
-              <Ellipse x:Name="knob" Width="14" Height="14" Fill="White"/>
-            </Grid>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="knob" Property="Width" Value="16"/>
-                <Setter TargetName="knob" Property="Height" Value="16"/>
-              </Trigger>
-              <Trigger Property="IsDragging" Value="True">
-                <Setter TargetName="knob" Property="Fill" Value="{StaticResource Accent}"/>
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-    <Style x:Key="Slide" TargetType="Slider">
-      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-      <Setter Property="IsMoveToPointEnabled" Value="True"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Height" Value="22"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Slider">
-            <Grid Background="Transparent">
-              <Border Height="4" CornerRadius="2" Background="#2A303B" VerticalAlignment="Center"/>
-              <Track x:Name="PART_Track">
-                <Track.DecreaseRepeatButton><RepeatButton Style="{StaticResource SlideFill}" Command="Slider.DecreaseLarge"/></Track.DecreaseRepeatButton>
-                <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource SlideRepeat}" Command="Slider.IncreaseLarge"/></Track.IncreaseRepeatButton>
-                <Track.Thumb><Thumb Style="{StaticResource SlideThumb}"/></Track.Thumb>
-              </Track>
-            </Grid>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-
     <!-- dropdowns on the Settings page (SettingsPage.cs fills them): the closed box, its list, and one entry -->
     <Style x:Key="DropToggle" TargetType="ToggleButton">
       <Setter Property="Focusable" Value="False"/>
@@ -926,7 +859,6 @@
               <RadioButton x:Name="NavGuide" Style="{StaticResource Nav}" Tag="&#xE7FC;" Content="Connect your PS5"/>
               <RadioButton x:Name="NavCheck" Style="{StaticResource Nav}" Tag="&#xE9D9;" Content="PC check"/>
               <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Tag="&#xE713;" Content="Settings"/>
-              <RadioButton x:Name="NavLooks" Style="{StaticResource Nav}" Tag="&#xE790;" Content="Looks"/>
               <RadioButton x:Name="NavHelp" Style="{StaticResource Nav}" Tag="&#xE897;" Content="Help"/>
             </StackPanel>
           </Grid>
@@ -1534,122 +1466,6 @@
                 <Grid x:Name="SetRows"/>
               </StackPanel>
             </ScrollViewer>
-          </Grid>
-
-          <!-- ======================== looks (LooksPage.cs builds the list and the editor) -->
-          <Grid x:Name="PageLooks" Visibility="Collapsed">
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto"/>
-              <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-            <StackPanel>
-              <TextBlock Style="{StaticResource Overline}" Text="LOOKS"/>
-              <TextBlock Style="{StaticResource H1}" Text="Give the picture a look"/>
-              <Grid Margin="0,8,0,0">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="Auto"/>
-                  <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <Border x:Name="LooksLive" CornerRadius="10" Background="#1E2A24" BorderBrush="#3DDC8E" BorderThickness="1" Padding="8,2" Margin="0,1,10,0"
-                        VerticalAlignment="Top" Visibility="Collapsed">
-                  <StackPanel Orientation="Horizontal">
-                    <Ellipse Width="6" Height="6" Fill="{StaticResource Good}" VerticalAlignment="Center"/>
-                    <TextBlock Text="LIVE" FontSize="10.5" FontWeight="Bold" Foreground="{StaticResource Good}" Margin="5,0,0,0"/>
-                  </StackPanel>
-                </Border>
-                <TextBlock x:Name="LooksStatus" Grid.Column="1" Style="{StaticResource Sub}" Margin="0"/>
-              </Grid>
-            </StackPanel>
-            <Grid Grid.Row="1" Margin="0,16,0,0">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="236"/>
-                <ColumnDefinition Width="*"/>
-              </Grid.ColumnDefinitions>
-              <!-- the looks: SmoovPlay's, then yours -->
-              <Border Style="{StaticResource Card}" Padding="0" Margin="0,0,16,0">
-                <Grid>
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                  </Grid.RowDefinitions>
-                  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
-                    <StackPanel x:Name="LooksList" Margin="8,10,8,10"/>
-                  </ScrollViewer>
-                  <Border Grid.Row="1" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="10">
-                    <UniformGrid Columns="2">
-                      <Button x:Name="BtnLookNew" Style="{StaticResource Ghost}" Height="34" Padding="8,0" Margin="0,0,4,0" Content="New look"
-                              ToolTip="A new look of your own, starting with a Color node."/>
-                      <Button x:Name="BtnLookPaste" Style="{StaticResource Ghost}" Height="34" Padding="8,0" Margin="4,0,0,0" Content="Paste a code"
-                              ToolTip="Copy a look code someone shared (it starts with SPL1-), then press this: the look is added to yours."/>
-                    </UniformGrid>
-                  </Border>
-                </Grid>
-              </Border>
-              <!-- the picked look: its name and buttons, the preview, then its nodes, top to bottom (a wide window puts
-                   the preview beside the nodes: LookPreview.cs) -->
-              <Grid x:Name="LookRight" Grid.Column="1">
-                <Grid.RowDefinitions>
-                  <RowDefinition Height="Auto"/>
-                  <RowDefinition Height="Auto"/>
-                  <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="*"/>
-                  <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel x:Name="LookHead" Grid.ColumnSpan="2"/>
-                <!-- the look on a sample game picture (framegen/looks_preview.py) -->
-                <Border x:Name="LookPreviewCard" Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource Card}" Padding="6" Margin="0,12,0,0"
-                        VerticalAlignment="Top" Visibility="Collapsed">
-                  <StackPanel>
-                    <Grid x:Name="LookPreviewBox" Background="#0B0D11" Cursor="Hand" HorizontalAlignment="Center"
-                          AutomationProperties.Name="Preview of the look. Hold to see the picture without it."
-                          ToolTip="Hold to see the picture without the look">
-                      <Image x:Name="LookPreviewImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
-                      <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8" CornerRadius="5" Background="#C0101318" Padding="7,2"
-                              IsHitTestVisible="False">
-                        <TextBlock x:Name="LookPreviewBadge" Text="LOOK" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF"/>
-                      </Border>
-                      <Border x:Name="LookPreviewWait" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="8" CornerRadius="5"
-                              Background="#C0101318" Padding="8,3" IsHitTestVisible="False" Visibility="Collapsed">
-                        <TextBlock x:Name="LookPreviewWaitText" Text="Drawing the look..." FontSize="11" Foreground="#C9CED8"/>
-                      </Border>
-                    </Grid>
-                    <Grid Margin="4,7,0,0">
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="Auto"/>
-                      </Grid.ColumnDefinitions>
-                      <StackPanel VerticalAlignment="Center">
-                        <TextBlock x:Name="LookPreviewTitle" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock x:Name="LookPreviewCredit" FontSize="11" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
-                      </StackPanel>
-                      <TextBlock x:Name="LookPreviewCount" Grid.Column="1" FontSize="11.5" Foreground="{StaticResource Muted}" VerticalAlignment="Center" Margin="8,0,6,0"/>
-                      <Button x:Name="BtnPreviewPrev" Grid.Column="2" Style="{StaticResource Ghost}" Width="30" Height="30" Padding="0"
-                              ToolTip="Another picture" AutomationProperties.Name="Previous picture">
-                        <TextBlock Style="{StaticResource Icon}" Text="&#xE76B;" FontSize="11"/>
-                      </Button>
-                      <Button x:Name="BtnPreviewNext" Grid.Column="3" Style="{StaticResource Ghost}" Width="30" Height="30" Padding="0" Margin="2,0,0,0"
-                              ToolTip="Another picture" AutomationProperties.Name="Next picture">
-                        <TextBlock Style="{StaticResource Icon}" Text="&#xE76C;" FontSize="11"/>
-                      </Button>
-                    </Grid>
-                  </StackPanel>
-                </Border>
-                <ScrollViewer x:Name="LookScroll" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,12,-14,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
-                  <ScrollViewer.OpacityMask>
-                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-                      <GradientStop Color="Black" Offset="0"/>
-                      <GradientStop Color="Black" Offset="0.94"/>
-                      <GradientStop Color="Transparent" Offset="1"/>
-                    </LinearGradientBrush>
-                  </ScrollViewer.OpacityMask>
-                  <StackPanel x:Name="LookNodes" Margin="0,0,14,24"/>
-                </ScrollViewer>
-              </Grid>
-            </Grid>
           </Grid>
 
           <!-- ======================== help -->

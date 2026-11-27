@@ -6,7 +6,7 @@ out, so framegen/chiaki_tap.py hands each decoded frame to a StreamConverter, wh
 
   "sdr"   (HDR stream, shown in SDR) 8-bit SDR, tone-mapped on the GPU as each frame is decoded: PQ to light, BT.2390's
           roll-off for highlights above SDR's range, BT.2020 to BT.709 colours, then SDR gamma. Everything after that
-          (RIFE, upscaling, looks, instant replay) is as usual. Any display.
+          (RIFE, upscaling) is as usual. Any display.
   "hdr10" (HDR output, Experimental) frames stay HDR10 (PQ, BT.2020) as half floats through RIFE and the upscaler,
           and the window presents them through a 10-bit DXGI swap chain in HDR10 colour space (framegen/
           dxgi_present.py), for an HDR display with Windows' HDR on. Without one, run.py uses "sdr" instead.
@@ -220,14 +220,6 @@ def convert_yuv(y: torch.Tensor, u: torch.Tensor, v: torch.Tensor, info: FrameIn
     return nits_to_pq16(nits, info.primaries, src_peak, display_peak)
 
 
-def pq16_to_sdr8_exact(frame: torch.Tensor, src_peak: float = SOURCE_PEAK_NITS,
-                       sdr_nits: float = SDR_WHITE_NITS) -> torch.Tensor:
-    """An HDR10 frame (pq16) -> sdr8, the same way "sdr" makes them (the maths, per pixel; pq16_to_sdr8 is the fast
-    one)."""
-    nits = pq_eotf(frame.float().flip(-1)) * PQ_MAX_NITS
-    return nits_to_sdr8(nits, PRI_BT2020, src_peak, sdr_nits)
-
-
 # ------------------------------------------------------------------------------------------------- 3D LUTs
 class Lut3D:
     """A function of three values (three out), sampled on a grid once and then applied to whole frames with one
@@ -317,24 +309,6 @@ def _yuv_lut(info: FrameInfo, out: str, src_peak: float, display_peak: float | N
 def _sdr_finish(lin: torch.Tensor) -> torch.Tensor:
     """Linear BT.709 (1 = SDR white), from a LUT -> uint8 SDR: clipped, then gamma, exactly, per pixel."""
     return lin.clamp_(0.0, 1.0).pow_(1.0 / SDR_GAMMA).mul_(255.0).round_().to(torch.uint8)
-
-
-_PQ_SDR_LUTS: dict = {}
-
-
-def pq16_to_sdr8(frame: torch.Tensor, src_peak: float = SOURCE_PEAK_NITS,
-                 sdr_nits: float = SDR_WHITE_NITS) -> torch.Tensor:
-    """An HDR10 frame (pq16) -> sdr8, the same way "sdr" makes them: for instant replay's clips while the window
-    shows HDR. Through a 3D LUT over PQ R'G'B' (see Lut3D)."""
-    key = (frame.device, src_peak, sdr_nits)
-    lut = _PQ_SDR_LUTS.get(key)
-    if lut is None:
-        def fn(pts):
-            nits = pq_eotf(pts) * PQ_MAX_NITS  # (N, 3) RGB
-            return _matrix(tone_map_nits(nits, src_peak, sdr_nits) / sdr_nits, BT2020_TO_709).flip(-1)
-        _PQ_SDR_LUTS[key] = lut = Lut3D(fn, ((0.0, 1.0, 129),) * 3, frame.device)
-    f = frame.float()
-    return _sdr_finish(lut(f[..., 2], f[..., 1], f[..., 0]))
 
 
 # pq16 -> 8-bit levels for the checks tuned on SDR frames (repeat and cut detection, the delay test, test mode's

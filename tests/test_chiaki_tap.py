@@ -87,7 +87,7 @@ def test_size_detector_recovers_after_a_still_stretch():
     assert out[20:] == [True, False] * 140  # back on track within a third of a second
 
 
-# ---- the game's sound, for instant replay (frametap.h "Sound ring"; chiaki_tap/selftest.py checks the C writer)
+# ---- the game's sound ring (frametap.h "Sound ring"; chiaki_tap/selftest.py checks the C writer)
 def test_sound_ring_roundtrip_split_and_times():
     from framegen.chiaki_tap import AUDIO_SLOT_HEADER, AUDIO_SLOT_SIZE, AUDIO_SLOTS, AudioTap, qpc
     import time

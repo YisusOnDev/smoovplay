@@ -24,6 +24,19 @@ def test_load_save_roundtrip_and_bad_values_ignored(tmp_path):
     assert Settings.load(path).scaler == "bilinear"
 
 
+def test_a_file_with_settings_that_were_removed_still_loads(tmp_path):
+    """Looks and Instant replay are gone: a settings file from before keeps working, and the next save drops them."""
+    path = tmp_path / "settings.json"
+    old = {"look_on": True, "look": "my:warm", "look_clips": True, "replay": 60, "replay_save": "both",
+           "replay_layout": "side", "hz": 90}
+    path.write_text(json.dumps(old))
+    st = Settings.load(path)
+    assert st.hz == 90 and not any(k in st.values() for k in old if k != "hz")
+    st.set("fullscreen", True)
+    saved = json.loads(path.read_text())
+    assert saved["hz"] == 90 and saved["fullscreen"] is True and not any(k in saved for k in old if k != "hz")
+
+
 def test_missing_or_corrupt_file_gives_defaults(tmp_path):
     assert Settings.load(tmp_path / "absent.json").hz == BY_KEY["hz"].default
     bad = tmp_path / "bad.json"
@@ -143,9 +156,8 @@ def test_menu_navigation_changes_settings():
 
 def test_the_main_page_has_the_quick_picks_and_a_row_for_each_section():
     m = Menu(Settings())
-    assert _keys(m) == ["interp", "hz", "scaler", "section:Smoothness", "section:Picture", "section:Looks",
-                        "section:Display", "section:Instant replay", "section:PS5 Remote Play",
-                        "section:Streaming"]
+    assert _keys(m) == ["interp", "hz", "scaler", "section:Smoothness", "section:Picture", "section:Display",
+                        "section:PS5 Remote Play", "section:Streaming"]
 
 
 def test_sections_open_and_go_back_where_the_player_was():
@@ -167,7 +179,7 @@ def test_sections_open_and_go_back_where_the_player_was():
 
 
 def test_every_setting_is_on_a_page():
-    for vals in ({}, {"model": "vfg"}, {"scaler": "vsr", "replay": 60, "overlay": True}):
+    for vals in ({}, {"model": "vfg"}, {"scaler": "vsr", "overlay": True}):
         st = Settings(vals)
         m = Menu(st)
         on_pages = {s.key for p in [None] + m.sections() for kind, s in m.page_rows(p) if kind == "setting"}
@@ -275,7 +287,7 @@ def test_the_in_video_menu_fits_a_window_whatever_is_picked():
 
 def test_the_menu_text_fits():
     from framegen.menu import KEYS, _wrap
-    m = Menu(Settings({"model": "vfg", "scaler": "vsr", "replay": 60}))
+    m = Menu(Settings({"model": "vfg", "scaler": "vsr"}))
     for section in m.sections():
         assert len(_wrap(m._section_help(section), 780 - 2 * 26, 0.5, 1)) <= 4, section  # 4 lines of help
     for keys in KEYS:

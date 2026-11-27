@@ -83,8 +83,7 @@ def test_picked_shortcuts_are_checked():
         parse_arg("jump=Ctrl+Alt+J")
     with pytest.raises(ValueError, match="same shortcut"):
         parse_arg("menu=Ctrl+Alt+K;quit=Alt+Ctrl+K")
-    with pytest.raises(ValueError, match="instant replay|replay"):
-        parse_arg("menu=Ctrl+Alt+R")
+    assert parse_arg("menu=Ctrl+Alt+R") == {"menu": "Ctrl+Alt+R"}  # (once instant replay's, now free)
     with pytest.raises(ValueError, match="menu: 'M'"):
         parse_arg("menu=M")
 
@@ -129,7 +128,7 @@ def test_the_menus_keys_are_taken_only_while_it_is_open():
 
 def _sink(u):
     """A video window over an app, without GL or a window: just what acting on the keys needs."""
-    keys = "M TAB ESCAPE Q I S U Z K J F L R B UP DOWN LEFT RIGHT ENTER KP_ENTER BACKSPACE".split()
+    keys = "M TAB ESCAPE Q I S U Z F L UP DOWN LEFT RIGHT ENTER KP_ENTER BACKSPACE".split()
     glfw = SimpleNamespace(PRESS=1, REPEAT=2, MOD_SHIFT=1, poll_events=lambda: None,
                            **{"KEY_" + k: 1000 + i for i, k in enumerate(keys)})
     menu = SimpleNamespace(open=False, pressed=[])

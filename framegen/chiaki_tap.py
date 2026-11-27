@@ -262,8 +262,10 @@ class FrameTap:
 
 
 class AudioTap:
-    """The game's sound from chiaki-ng (frametap.h, "Sound ring"): 16-bit PCM chunks timed by their arrival, for
-    instant replay. A chiaki-ng from before this ring never writes it (its `features` lack FEATURE_AUDIO_TAP)."""
+    """The game's sound from chiaki-ng (frametap.h, "Sound ring"): 16-bit PCM chunks timed by their arrival. The pipeline
+    doesn't read it (instant replay did, and is gone): chiaki_tap/selftest.py reads it to check chiaki-ng's writer,
+    and the fake PS5 (scripts/frametap_fake.py) writes it. A chiaki-ng from before this ring never writes it (its
+    `features` lack FEATURE_AUDIO_TAP)."""
 
     def __init__(self, name: str = NAME + AUDIO_SUFFIX) -> None:
         self.mm = open_map(name, AUDIO_TOTAL)
@@ -468,8 +470,6 @@ class ChiakiSource:
         from .sources import source_info
         self.app, self.tag = app, "[tap]" if app else "[chiaki]"
         self.tap = FrameTap(tap_name, tap_name + "-frame")
-        self.sound = AudioTap(tap_name + AUDIO_SUFFIX)  # the game's sound, for instant replay
-        self._sound_session: int | None = None
         self.test = test
         self._last_idr = 0.0
         self._header_file = Path(tempfile.gettempdir()) / (tap_name.split("\\")[-1] + "-header.bin")
@@ -763,21 +763,6 @@ class ChiakiSource:
     def set_audio_delay(self, ms: float) -> None:
         self.tap.set_audio_delay(round(ms))
 
-    # Instant replay's sound: chiaki-ng copies the game's sound into a ring of its own (a chiaki-ng from before that
-    # leaves it empty, and replays are silent).
-    def has_sound(self) -> bool:
-        return bool(self.tap.features() & FEATURE_AUDIO_TAP) and self.sound.live()
-
-    def read_sound(self) -> list:
-        """The game's sound that arrived since the last call (framegen.io.Sound chunks); [] if there's none."""
-        h = self.tap.header()
-        if not h.live:
-            return []
-        if h.session != self._sound_session:  # a new stream: start from its current sound
-            self._sound_session = h.session
-            self.sound.reset()
-        return self.sound.read_new()
-
     def hold(self, on: bool) -> None:
         """Stop decoding while the pipeline restarts (on), and start again from a fresh frame (off)."""
         if on:
@@ -834,9 +819,5 @@ class ChiakiSource:
         self._stop = True
         if self._log is not None:
             self._log.close()
-        try:
-            self.sound.close()
-        except (BufferError, ValueError):  # still being read: it goes with the process
-            pass
         print(f"{self.tag} decoded frames dropped: {self.dropped}, stream frames skipped: {self.skipped}, "
               f"keyframe requests: {self.idr_requests}")

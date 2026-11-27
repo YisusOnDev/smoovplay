@@ -11,7 +11,7 @@
 //                                                        launcher that started it, Updater.cs) has closed; then open it
 //                --uninstall [--yes]                                               remove an installed copy
 //                --diagnostics <file>                                              write what "Copy diagnostics" copies
-//                --page <check|play|guide|settings|looks|help>                           open the launcher on that page
+//                --page <check|play|guide|settings|help>                           open the launcher on that page
 // Dev/testing:   SMOOVPLAY_PYTHON, SMOOVPLAY_APP, SMOOVPLAY_CHIAKI, SMOOVPLAY_CHIAKI_ARGS environment variables run
 //                the launcher against a dev checkout (e.g. the repo's venv with scripts\frametap_fake.py as "chiaki");
 //                SMOOVPLAY_RUN_ARGS adds arguments to run.py; SMOOVPLAY_TRACE=<file> traces; SMOOVPLAY_PREFS=<file>
@@ -1283,9 +1283,8 @@ namespace SmoovPlay
         {
             lock (gate)
             {
-                // (the Looks page sends a look up to 25 times a second while a slider moves: just its size)
                 if (log != null) log.WriteLine(command == "quit" ? "[launcher] Stop: asked the video window to close"
-                    : "[launcher] settings: " + (command.StartsWith("look-show ") ? "look-show (" + command.Length + " characters)" : command));
+                    : "[launcher] settings: " + command);
                 try
                 {
                     if (commands == null || !Running) return false;
@@ -1296,8 +1295,8 @@ namespace SmoovPlay
             }
         }
 
-        /// <summary>Stops the session. Once the video is up it's asked to close, as Esc does, so a clip being saved is
-        /// finished and chiaki-ng comes back; it's ended outright if it hasn't gone 20 s later, if it isn't up yet,
+        /// <summary>Stops the session. Once the video is up it's asked to close, as Esc does, so chiaki-ng comes
+        /// back; it's ended outright if it hasn't gone 20 s later, if it isn't up yet,
         /// or on a second Stop.</summary>
         public void Stop()
         {
@@ -1362,70 +1361,6 @@ namespace SmoovPlay
                 streamEnded = true;
             else if (line.StartsWith("[window-keys] "))
                 OnWindowKeys(line.Substring("[window-keys] ".Length));
-        }
-    }
-
-    /// <summary>Before &amp; after videos being made (framegen/replay.py, SAVING_DIR). Each is a process of its own that
-    /// carries on after the video window and this launcher close, and keeps %APPDATA%\framegen\saving\&lt;process id&gt;.txt
-    /// while it works: the video's path, then "failed: why" if it failed. Updating, repairing or uninstalling replaces
-    /// the Python it runs on, so those stop it.</summary>
-    static class Saving
-    {
-        public class Video { public int Pid; public string Out, Failed; public bool Running; }
-
-        static string Dir { get { return Path.Combine(Paths.SettingsDir, "saving"); } }
-
-        /// <summary>Every one there: still being made, failed, or left by one that was stopped.</summary>
-        public static List<Video> Read()
-        {
-            var all = new List<Video>();
-            try
-            {
-                if (!Directory.Exists(Dir)) return all;
-                foreach (var f in Directory.GetFiles(Dir, "*.txt"))
-                {
-                    int pid;
-                    string[] l;
-                    if (!int.TryParse(Path.GetFileNameWithoutExtension(f), out pid)) continue;
-                    try { l = File.ReadAllLines(f); } catch (Exception) { continue; }  // being written
-                    if (l.Length == 0 || l[0].Trim().Length == 0) continue;
-                    var v = new Video { Pid = pid, Out = l[0].Trim() };
-                    v.Failed = l.Length > 1 && l[1].StartsWith("failed: ") ? l[1].Substring(8).Trim() : null;
-                    v.Running = v.Failed == null && Alive(pid, File.GetLastWriteTime(f));
-                    all.Add(v);
-                }
-            }
-            catch (Exception) { }
-            return all;
-        }
-
-        /// <summary>That process is still the one that wrote the file at `since` (not a later one given its id).</summary>
-        static bool Alive(int pid, DateTime since)
-        {
-            try
-            {
-                using (var pr = Process.GetProcessById(pid))
-                    return !pr.HasExited && pr.ProcessName.StartsWith("python", StringComparison.OrdinalIgnoreCase)
-                           && pr.StartTime <= since.AddSeconds(2);
-            }
-            catch (Exception) { return false; }
-        }
-
-        /// <summary>Done with it: its file goes, and an unfinished video's ".part" with it.</summary>
-        public static void Forget(Video v)
-        {
-            try { File.Delete(Path.Combine(Dir, v.Pid + ".txt")); } catch (Exception) { }
-            if (!v.Running) { try { File.Delete(v.Out + ".part"); } catch (Exception) { } }
-        }
-
-        public static void Stop(IEnumerable<Video> videos)
-        {
-            foreach (var v in videos.Where(x => x.Running).ToList())
-            {
-                try { using (var pr = Process.GetProcessById(v.Pid)) { pr.Kill(); pr.WaitForExit(5000); } } catch (Exception) { }
-                v.Running = false;
-                Forget(v);
-            }
         }
     }
 
