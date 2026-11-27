@@ -233,6 +233,62 @@ void Black(uint8_t* dst, int w, int h, Fmt f) {
     }
 }
 
+// What the camera shows while SmoovPlay isn't sending (not playing, or its camera setting off): a note saying so,
+// drawn with GDI as a BGR picture like SmoovPlay's own frames, instead of a black screen that looks broken.
+// Empty if GDI couldn't draw it (then black).
+std::vector<uint8_t> WaitingPicture(int w, int h) {
+    std::vector<uint8_t> out;
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;  // rows top to bottom
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    HDC dc = CreateCompatibleDC(nullptr);
+    if (!dc) return out;
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (bmp && bits) {
+        HGDIOBJ old = SelectObject(dc, bmp);
+        RECT all = {0, 0, w, h};
+        HBRUSH bg = CreateSolidBrush(RGB(18, 18, 22));
+        FillRect(dc, &all, bg);
+        DeleteObject(bg);
+        SetBkMode(dc, TRANSPARENT);
+        HFONT title_font = CreateFontW(-h / 14, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH,
+                                L"Segoe UI");
+        HFONT note_font = CreateFontW(-h / 32, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, DEFAULT_PITCH,
+                                  L"Segoe UI");
+        SelectObject(dc, title_font);
+        SetTextColor(dc, RGB(255, 176, 46));
+        RECT title = {0, h * 2 / 5 - h / 10, w, h * 2 / 5 + h / 20};
+        DrawTextW(dc, L"SmoovPlay Camera", -1, &title, DT_CENTER | DT_BOTTOM | DT_SINGLELINE);
+        SelectObject(dc, note_font);
+        SetTextColor(dc, RGB(225, 225, 230));
+        RECT note = {w / 10, h * 2 / 5 + h / 12, w - w / 10, h};
+        DrawTextW(dc, L"Waiting for SmoovPlay: the picture appears as soon as it plays.\n"
+                      L"If it doesn't, turn on Settings > Streaming > SmoovPlay Camera in SmoovPlay.",
+                  -1, &note, DT_CENTER | DT_TOP | DT_WORDBREAK);
+        GdiFlush();
+        out.resize((size_t)w * h * 3);
+        const uint8_t* s = static_cast<const uint8_t*>(bits);
+        for (size_t i = 0, n = (size_t)w * h; i < n; i++) {
+            out[i * 3] = s[i * 4];
+            out[i * 3 + 1] = s[i * 4 + 1];
+            out[i * 3 + 2] = s[i * 4 + 2];
+        }
+        SelectObject(dc, old);
+        DeleteObject(title_font);
+        DeleteObject(note_font);
+    }
+    if (bmp) DeleteObject(bmp);
+    DeleteDC(dc);
+    return out;
+}
+
 // ---- the output pin
 class CCamPin : public CSourceStream, public IAMStreamConfig, public IKsPropertySet {
 public:
@@ -347,9 +403,18 @@ public:
             last_ = kWriting;
             frame_.clear();
         }
-        if (frame_.empty() || fw_ <= 0)
-            Black(data, dw, dh, fmt);  // SmoovPlay isn't playing
-        else if (fmt == kNV12)
+        if (frame_.empty() || fw_ <= 0) {  // SmoovPlay isn't sending: the note saying so
+            if (waitW_ != dw || waitH_ != dh) {
+                waiting_ = WaitingPicture(dw, dh);
+                waitW_ = dw; waitH_ = dh;
+            }
+            if (waiting_.empty())
+                Black(data, dw, dh, fmt);
+            else if (fmt == kNV12)
+                ToNV12(waiting_.data(), dw, dh, data, dw, dh, &xmap_);
+            else
+                ToRGB32(waiting_.data(), dw, dh, data, dw, dh, &xmap_);
+        } else if (fmt == kNV12)
             ToNV12(frame_.data(), fw_, fh_, data, dw, dh, &xmap_);
         else
             ToRGB32(frame_.data(), fw_, fh_, data, dw, dh, &xmap_);
@@ -456,6 +521,8 @@ private:
     uint64_t last_ = kWriting, delivered_ = 0, repeats_ = 0, skipped_ = 0;
     std::vector<uint8_t> frame_;
     XMap xmap_;
+    std::vector<uint8_t> waiting_;  // WaitingPicture at the output's size
+    int waitW_ = 0, waitH_ = 0;
     int fw_ = 0, fh_ = 0;
 };
 

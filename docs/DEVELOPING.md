@@ -148,7 +148,7 @@ made-up PCs.
 | Window presentation | Standard / Low delay (Experimental: DXGI flip model, so a window skips the compositor's copy and G-Sync works in a window; fullscreen uses Standard; `--present gl\|dxgi`). With Windows' HDR on for the main display it's always DXGI, fullscreen as a borderless window: OpenGL's own fullscreen switches the display to SDR while it's in front (`FRAMEGEN_KEEP_HDR=0` turns this off) | next Play |
 | Minimise chiaki-ng | On / Off | live (PS5 Remote Play only) |
 | Sound in sync | On / Off (chiaki-ng holds its sound back to meet the picture) | live (PS5 Remote Play only) |
-| SmoovPlay Camera | On / Off (every frame shown, with its ideal time, to a DirectShow camera OBS opens, delivered evenly at 60 fps 80 ms behind; `framegen/vcam.py`, `native/vcam`) | live (Windows) |
+| SmoovPlay Camera | On / Off (every frame shown, with its ideal time, to a DirectShow camera OBS opens, delivered evenly at 60 fps 60 ms behind; on by default, costs nothing until an app opens it; `framegen/vcam.py`, `native/vcam`) | live (Windows) |
 | Simulate a 30 fps game | Off / On | live, this session only, never saved (any 60 Hz source: Remote Play, a capture card, or a file with `--raw`; `--test-mode`) |
 | Debug snapshots | Off / On (this session only, never saved: every 5 s the real frame and Steady HUD's mask go into `logs\debug-<session>\`, with a `[debug]` line in the log; [`framegen/debugsnap.py`](../framegen/debugsnap.py)) | live |
 | Steady HUD | Off / On (off by default; results vary by game; RIFE on CUDA and DirectML, and NVIDIA VFG, [`framegen/steady.py`](../framegen/steady.py)) | live |

@@ -16,6 +16,8 @@ if "%VSDIR%"=="" (
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
 cd /d "%~dp0"
 if not exist build mkdir build
+rem A DLL that OBS or Discord has loaded cant be overwritten, but it can be renamed out of the way
+if exist build\smoovplay-camera.dll move /y build\smoovplay-camera.dll build\smoovplay-camera-old-%RANDOM%.dll >nul 2>&1
 set BASE=baseclasses\amextra.cpp baseclasses\amfilter.cpp baseclasses\amvideo.cpp baseclasses\arithutil.cpp ^
   baseclasses\combase.cpp baseclasses\ctlutil.cpp baseclasses\dllentry.cpp ^
   baseclasses\dllsetup.cpp baseclasses\mtype.cpp baseclasses\pstream.cpp baseclasses\refclock.cpp ^

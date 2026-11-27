@@ -57,17 +57,17 @@
 > - También trae lo último del original que aún no ha salido en su release (lo de Linux y macOS, que en Windows
 >   no cambia nada).
 >
-> **Para hacer streaming con OBS: SmoovPlay Camera.** En vez de capturar la ventana de SmoovPlay, activa
-> *Settings → Streaming → SmoovPlay Camera* y en OBS añade *Fuente → Dispositivo de captura de vídeo → SmoovPlay
-> Camera*, con *Búfer: Activar*. Por qué es mejor:
+> **Para hacer streaming con OBS: SmoovPlay Camera.** En vez de capturar la ventana de SmoovPlay, en OBS añade
+> *Fuente → Dispositivo de captura de vídeo → SmoovPlay Camera*, con *Búfer: Activar*. Viene activada (se apaga en
+> *Settings → Streaming*); mientras SmoovPlay no juega, la cámara muestra un aviso en vez de negro. Por qué es mejor:
 > - **Llegan todos los fotogramas, parejos a 60 fps.** OBS hace una "foto" de la ventana cada 1/60 s y, como el
 >   fotograma intermedio está poco tiempo en pantalla, a la retransmisión solo llegaba alrededor de un tercio de
 >   ellos. La cámara le pasa cada fotograma en orden: en una prueba de 20 s llegaron los 1196, sin repetidos ni
 >   saltados.
 > - **Sin el menú, los avisos ni las estadísticas**, y sigue funcionando en pantalla completa aunque hagas clic en
 >   SmoovPlay (la captura de ventana se congelaba).
-> - **Solo vídeo:** el sonido del juego se captura como siempre. La imagen de la cámara va 80 ms por detrás de la
->   de tu pantalla, así que en OBS dale al sonido del juego un *desfase de sincronización* de +80 ms (Propiedades
+> - **Solo vídeo:** el sonido del juego se captura como siempre. La imagen de la cámara va 60 ms por detrás de la
+>   de tu pantalla, así que en OBS dale al sonido del juego un *desfase de sincronización* de +60 ms (Propiedades
 >   avanzadas de audio).
 > - **No funciona con OBS abierto como administrador** (Windows no le deja ver cámaras instaladas por usuario).
 >   Abre OBS normal.

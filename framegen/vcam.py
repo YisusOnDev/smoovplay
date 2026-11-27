@@ -45,7 +45,9 @@ MAX_W, MAX_H = 2560, 1440  # up to a 1440p capture; 4K is too big for the ring
 SLOT_STRIDE = -(-(SLOT_HEADER + MAX_W * MAX_H * 3) // 4096) * 4096
 TOTAL = HEADER + SLOTS * SLOT_STRIDE
 FPS = 60
-DELAY_MS = 80  # D: frames go to OBS this long after their ideal time (covers the pipeline's own delay, p99)
+# D: frames go to OBS this long after their ideal time. It covers the pipeline's own delay: a 20-minute session
+# wrote them 25 ms after (p99 38 ms, the backlog's worst 55 ms)
+DELAY_MS = 60
 READER_GONE_S = 2.0
 U64_MAX = (1 << 64) - 1
 # Test mode: the frame's number as a bar code in the top-left corner of the camera's copy (never the window's), so a

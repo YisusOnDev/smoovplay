@@ -369,13 +369,13 @@ SPECS: tuple[Spec, ...] = (
               "times the whole trip, from a button press to SmoovPlay's screen (PS5 Remote Play).",
          impact={"speed": "None: only the sound waits, by as long as the picture does."}),
     # framegen/vcam.py and native/vcam (the DirectShow camera OBS opens). Windows only; the launcher registers it.
-    Spec("vcam", "SmoovPlay Camera", (False, True), False, ON_OFF, group="Streaming",
+    Spec("vcam", "SmoovPlay Camera", (True, False), True, ON_OFF, group="Streaming",
          help="For streaming: SmoovPlay's frames as a camera for OBS. Add a Video Capture Device, pick SmoovPlay "
               "Camera, Buffering: Enable. Every frame arrives, evenly, without the menu or messages, even in "
-              "fullscreen. The picture is 80 ms behind: give the game's sound +80 ms sync offset in OBS. Not for "
+              "fullscreen. The picture is 60 ms behind: give the game's sound +60 ms sync offset in OBS. Not for "
               "OBS run as administrator.",
          impact={"picture": "The stream gets every frame, evenly; nothing changes on your screen.",
-                 "speed": "About 1 ms a frame, and only while OBS has the camera open."}),
+                 "speed": "None until an app opens the camera; then about 1 ms a frame."}),
 )
 BY_KEY = {s.key: s for s in SPECS}
 

@@ -165,8 +165,9 @@ def test_the_sink_copies_only_while_the_camera_is_read(ring_name):
     reader.close()
 
 
-def test_off_by_default_and_hdr_turns_it_off(ring_name):
-    sink = CameraSink(Settings({}), name=ring_name)
+def test_on_by_default_off_when_set_off_and_hdr_turns_it_off(ring_name):
+    assert Settings({}).vcam is True  # on by default: it costs nothing until an app opens the camera
+    sink = CameraSink(Settings({"vcam": False}), name=ring_name)
     sink.write(np.zeros((32, 64, 3), np.uint8))
     assert sink.ring is None
     if WINDOWS:
