@@ -44,6 +44,12 @@ COMPRESSED_RANK = {"mjpeg": 10}
 BYTES_PER_PIXEL = {"nv12": 1.5, "yuv420p": 1.5, "yuyv422": 2, "uyvy422": 2, "bgr24": 3, "rgb24": 3, "bgr0": 4}
 CONVERTIBLE = ("nv12", "yuyv422", "uyvy422")  # converted here; anything else raw goes through PyAV's own conversion
 DAMAGED = object()  # a compressed frame the decoder couldn't read: skipped (CardSource._damaged)
+# An empty JPEG (start and end markers, no picture): some cheap cards (an AliExpress "USB Video" one, measured)
+# offer 1080p at 60 fps but send a real picture only every other frame, with one of these between. It means
+# "the same picture again": shown as a repeat of the one before, so a 30 fps game still arrives as a steady 60 Hz
+# stream and frame generation fills in the in-between frames (CardSource._reader).
+EMPTY = object()
+EMPTY_JPEG_MAX = 4096  # bytes: a real 1080p JPEG is tens of kB even when dark; the empty ones are 4 bytes
 # No frame readable for this long: the card's frames aren't readable at all, and capture stops. Generous, as a stick
 # can send broken frames for a moment while it settles on the signal.
 DAMAGED_GIVE_UP_S = 5.0
@@ -273,7 +279,15 @@ def pick_audio(video: str, devices: list[Device]) -> str | None:
     vw = _words(video)
     scored = [(len(vw & _words(a)), a) for a in audio]
     best = max(scored, default=(0, None))
-    return best[1] if best[0] > 0 and sum(n == best[0] for n, _ in scored) == 1 else None
+    if best[0] > 0 and sum(n == best[0] for n, _ in scored) == 1:
+        return best[1]
+    # Cheap cards on MacroSilicon chips (MS2109, MS2130) call their picture "USB Video" and their sound "Digital Audio
+    # Interface (USB Digital Audio)": nothing in common. One such sound device that no other video device is named in
+    # is this card's.
+    others = [_card_name(d.name) for d in devices if d.kind == "video" and d.name != video]
+    macro = [a for a in audio if a.lower().startswith("digital audio interface")
+             and not any(o and o in a.lower() for o in others)]
+    return macro[0] if len(macro) == 1 else None
 
 
 # FourCCs FFmpeg's DirectShow input lists as "unknown compression type" but that are worth knowing about: a card's
@@ -494,6 +508,7 @@ class CardSource:
         self.info = source_info("capture", hz=self.fps, name=name)
         self.dropped = 0
         self.lost = 0  # a card's frames lost before they reached us: gaps in its timestamps (_reader)
+        self.empty = 0  # empty JPEGs shown as repeats (EMPTY)
         self.damaged = 0  # frames the decoder couldn't read, skipped (_damaged)
         self._damaged_since: float | None = None  # when the current run of them began
         self._stop = False
@@ -648,6 +663,7 @@ class CardSource:
             boost_thread()
         t0, n = time.perf_counter(), 0
         prev_src = None
+        last = None  # the last real frame and when it came (for EMPTY ones)
         try:
             for frame, t_arrival, t_src in self._frames():
                 if self._stop:
@@ -672,7 +688,23 @@ class CardSource:
                 if frame is None:  # a damaged frame, skipped: numbered all the same, as a frame the card sent
                     n += 1
                     continue
-                tick = Tick(frame, t_arrival, 0, t_source=t_src, t_ready=time.perf_counter())
+                new_hint = None  # the pipeline compares pictures
+                if frame is EMPTY:
+                    self.empty += 1
+                    if self.empty == 1:
+                        print(f"[capture] the card sends an empty picture between real ones (it really delivers "
+                              f"{self.fps / 2:g} fps at {self.w}x{self.h}): each is shown as a repeat of the one before")
+                    if last is None:
+                        n += 1
+                        continue
+                    # On the beat between the real frames around it: the card often sends it straight after the
+                    # real one, and a repeat handed on at once would be shown right after the in-between frame
+                    if (wait := last[1] + 1 / self.fps - time.perf_counter()) > 0:
+                        time.sleep(wait)
+                    frame, t_arrival, new_hint = last[0], time.perf_counter(), False
+                else:
+                    last = (frame, t_arrival)
+                tick = Tick(frame, t_arrival, 0, new_hint=new_hint, t_source=t_src, t_ready=time.perf_counter())
                 # Numbered as they come off the card, so a frame dropped from the queue below (the PC behind for a
                 # moment) doesn't shift the count: Game frame rate 30 fps takes every other one as new
                 # (cadence.RhythmLock), and a shift by one made it move its beat later, a visible hitch.
@@ -721,6 +753,12 @@ class CardSource:
             if packet.stream is not self.stream:
                 self._sound(packet, t_arrival)
                 continue
+            if self.fmt == "mjpeg" and not self.raw and packet.size <= EMPTY_JPEG_MAX:
+                data = bytes(packet)
+                if data[:2] == b"\xff\xd8" and b"\xff\xda" not in data:  # a JPEG with no scan: no picture (EMPTY)
+                    t_src = float(packet.pts * packet.time_base) if packet.pts is not None else None
+                    yield EMPTY, t_arrival, t_src
+                    continue
             # The conversion (NV12 to BGR, NVDEC's MJPEG) runs on CUDA's legacy default stream: during the
             # interpolator's CUDA graph capture at startup that breaks the capture and stops this thread
             # (cudaErrorStreamCaptureImplicit), so it waits for it, as the Remote Play reader does
@@ -896,7 +934,8 @@ class CardSource:
             self._report_sound(final=True)
         print(f"[capture] dropped frames: {self.dropped}"
               + (f", lost before SmoovPlay got them (gaps in the card's timestamps): {self.lost}" if self.live else "")
-              + (f", damaged frames from the card skipped: {self.damaged}" if self.damaged else ""))
+              + (f", damaged frames from the card skipped: {self.damaged}" if self.damaged else "")
+              + (f", empty pictures shown as repeats: {self.empty}" if self.empty else ""))
 
 
 def _cuda_device() -> str | None:

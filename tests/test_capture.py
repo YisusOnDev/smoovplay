@@ -470,3 +470,36 @@ def test_the_card_queue_rides_out_a_short_stall():
     assert c.CardSource.__init__.__defaults__ is not None
     import inspect
     assert inspect.signature(c.CardSource.__init__).parameters["queue_size"].default >= 6  # ~100 ms at 60 fps
+
+
+def _mjpeg_with_empties(tmp_path, frames):
+    """An MJPEG file like a cheap card that offers 1080p at 60 fps but sends a real picture every other frame, with
+    an empty JPEG (start and end markers only, 4 bytes) between, as measured on an AliExpress "USB Video" card."""
+    import av
+    path = str(tmp_path / "card.mkv")
+    out = av.open(path, "w")
+    from fractions import Fraction
+    s = out.add_stream("mjpeg", rate=60)
+    h, w = frames[0].shape[:2]
+    s.width, s.height, s.pix_fmt, s.time_base = w, h, "yuvj420p", Fraction(1, 60)
+    for i, f in enumerate(frames):
+        for k, data in enumerate((cv2.imencode(".jpg", f)[1].tobytes(), b"\xff\xd8\xff\xd9")):
+            p = av.Packet(data)
+            p.stream, p.time_base = s, Fraction(1, 60)
+            p.pts = p.dts = 2 * i + k
+            out.mux(p)
+    out.close()
+    return path
+
+
+def test_empty_jpegs_are_shown_as_repeats(tmp_path):
+    import av
+    frames = [_blocks(seed=s)[0] for s in range(70, 76)]
+    src = c.CardSource(av.open(_mjpeg_with_empties(tmp_path, frames)), "a cheap card", live=False, device="cpu")
+    ticks = _frames_of(src)
+    src.close()
+    assert src.empty == len(frames) and src.damaged == 0
+    assert len(ticks) == 2 * len(frames)  # a steady 60 Hz stream: every real picture, then itself again
+    assert [t.new_hint for t in ticks] == [None, False] * len(frames)
+    for a, b in zip(ticks[::2], ticks[1::2]):
+        assert b.frame is a.frame

@@ -286,7 +286,12 @@ def test_the_cards_sound_device_is_found_by_name():
     assert c.pick_audio("USB3.0 Capture", devs) == "Digital Audio Interface (USB3.0 Capture)"
     assert c.pick_audio("Cam Link 4K", devs) == "Cam Link 4K"
     assert c.pick_audio("Game Capture HD60 X", devs) == "Game Capture HD60 X Audio"
-    assert c.pick_audio("USB Video", devs) is None  # generic words only: no guess
+    assert c.pick_audio("USB Video", devs) is None  # generic words only, and the one MacroSilicon sound is USB3.0's
+    # A MacroSilicon card (AliExpress, MS2109/MS2130): its sound shares no word with "USB Video"
+    ms = [D("USB Video", "video"), D("SmoovPlay Camera", "video"),
+          D("Digital Audio Interface (USB Digital Audio)", "audio"), D("Microphone Array (Realtek(R) Audio)", "audio")]
+    assert c.pick_audio("USB Video", ms) == "Digital Audio Interface (USB Digital Audio)"
+    assert c.pick_audio("USB Video", ms + [D("Digital Audio Interface (2- USB Digital Audio)", "audio")]) is None
     assert c.pick_audio("Elgato 4K X", [D("Elgato 4K X", "video"), D("Line (Elgato 4K X)", "audio"),
                                          D("Line (Elgato Wave)", "audio")]) == "Line (Elgato 4K X)"
     # AVerMedia (issue 23): "-Video"/"-Audio" endings, and a "Not To Use" device named like the real one

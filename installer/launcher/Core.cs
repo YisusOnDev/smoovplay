@@ -1205,7 +1205,7 @@ namespace SmoovPlay
             string picked = Pref(prefs, "capture-video:");
             if (picked != null && Video.Contains(picked)) return picked;
             return Video.FirstOrDefault(n => System.Text.RegularExpressions.Regex.IsMatch(n, CardPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                   ?? Video.FirstOrDefault();
+                   ?? Video.FirstOrDefault(n => n != "SmoovPlay Camera");  // never our own camera: it shows SmoovPlay
         }
 
         /// <summary>The sound: null for "auto" (the device named like the card), "off", or a device's name.</summary>
