@@ -53,6 +53,15 @@
 > - **El registro de cada sesión apunta todos los ajustes** y cada cambio mientras juegas, para poder ver cómo
 >   jugó cada uno.
 > - **SmoovPlay Camera**, una cámara para OBS con todos los fotogramas parejos (más abajo).
+> - **Even pacing (ritmo parejo)**, en *Settings → Smoothness*, apagado por defecto. Sin él, a 60 fps cada
+>   fotograma sale en cuanto está listo: el intermedio se ve unos pocos ms y el real unos 30, y aunque el contador
+>   diga 60 el movimiento cojea. Con él, cada fotograma sale a su hora, como hace Veyra. Cuesta unos 8-15 ms más de
+>   retraso. Si tu gráfica tarda más de 16,7 ms en el fotograma intermedio (p. ej. AMD o una portátil), queda
+>   mucho más parejo pero no exacto. En una RX 9070 XT: huecos de menos de 8 ms entre fotogramas del 49 % al 4 %.
+> - **Capturadoras:** FFmpeg tiraba fotogramas sin avisar en cuanto SmoovPlay se retrasaba unos 35 ms; ahora
+>   tiene más margen, los que se pierden igualmente se cuentan (sale en el log al cerrar) y el hilo que lee la
+>   capturadora tiene prioridad.
+> - **Windows ya no frena SmoovPlay ni chiaki-ng** para ahorrar energía cuando haces clic en otra ventana.
 > - **Arreglos que otros han propuesto al original y aún no están en él:** el sonido de la capturadora ya no se va
 >   retrasando durante la sesión (Elgato HD60 X), activar la interpolación mientras el juego baja de 30 fps ya no
 >   cierra la sesión, y guardar dos repeticiones en el mismo segundo ya no estropea una.
