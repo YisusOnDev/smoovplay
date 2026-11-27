@@ -15,6 +15,7 @@ from .cadence import Action, CadenceScheduler, CutDetector, DipWatch, DuplicateD
 from .hdr import level8, to_u8
 from .interpolator import STEADY_HUD_THRESHOLD, RifeInterpolator
 from .io import TICK, MiniText, Waiting
+from .pacing import EvenPacer, wait_until
 from .vcam import StreamClock
 
 
@@ -194,6 +195,7 @@ class Stats:
     # window, before any processing): late frames and bunches point at the network or the capture (arrival_line)
     new_gaps_ms: list = field(default_factory=list)
     wall_s: float = 0.0
+    pacing: str = ""  # Even pacing's line (framegen/pacing.py EvenPacer.summary), when it was on
     exit: str = "end"  # why run() returned: "end" (source finished), "quit" or "restart" (asked by the sink)
     stale: int = 0  # frames skipped because they arrived before run() started (queued during a restart)
     # The engine's numbers mustn't be shared (NVIDIA VFG: its licence forbids publishing benchmark results), and the
@@ -229,6 +231,8 @@ class Stats:
         ]
         if arrival := self.arrival_line():  # (the game's frames, not the engine's work: in a private log too)
             lines.append(arrival)
+        if self.pacing:
+            lines.append(self.pacing)
         tg = self.test_game_new + self.test_game_repeat
         if tg:
             lines.append(f"test mode: {self.test_game_repeat} of {tg} frames were repeats in the game itself (a steady "
@@ -420,6 +424,9 @@ class Pipeline:
         # frame with its ideal time, the tick's plus the frame's place within it at 90 and 120 fps (present's `at`)
         clock, tick_at = StreamClock(), 0.0
         ideal_out = bool(getattr(sink, "takes_ideal", False))
+        # Even pacing (settings.even_pacing, framegen/pacing.py): every frame shown at its ideal time + D on that clock
+        pacer: EvenPacer | None = None
+        paced = EvenPacer()  # kept for the summary while it's off again
         cuts = CutDetector(self.cut_threshold)
         slot = 0
         key_frame: np.ndarray | None = None  # last frame that arrived as new content
@@ -528,6 +535,8 @@ class Pipeline:
             if isinstance(tick, Waiting):  # no frame for a moment: keep the window answering until one comes
                 self.waiting = tick
                 clock.reset()
+                if pacer is not None:
+                    pacer.restart()  # D measured afresh when frames come again
                 if sink is not None and hasattr(sink, "wait"):
                     cmd = sink.wait(tick)
                     if cmd in ("quit", "restart"):
@@ -553,6 +562,11 @@ class Pipeline:
                     print(f"[pipeline] test mode (simulated 30 fps game) {'ON' if settings.simulate_30 else 'OFF'}")
                 if settings.simulate_30:
                     st.simulated += 1
+                if bool(getattr(settings, "even_pacing", False) and sink is not None) != (pacer is not None):
+                    pacer = paced if pacer is None else None
+                    if pacer is not None:
+                        pacer.restart()
+                    print(f"[pipeline] even pacing {'ON' if pacer is not None else 'OFF'}")
                 if settings.interp != enabled:
                     enabled, sched, quarter_due, ov_next = settings.interp, CadenceScheduler(), False, 0.0
                     timeline = FrameTimeline()  # afresh too: its frames are from before interpolation went off
@@ -643,6 +657,7 @@ class Pipeline:
 
             to_score = None
             early_cmd = None  # 90/120 Hz: the first of this tick's two frames, already shown
+            held = 0.0  # Even pacing: seconds this tick's frames were held for their time (not processing)
             mid_t = 0.5  # the generated frame this tick ends on
             main_at = 0.0  # the tick's main frame's ideal time, in ticks from the tick's (present's `at`)
             # Behind = waiting frames, not decode time: a Remote Play frame's arrival is before its ~3-11 ms decode.
@@ -662,8 +677,14 @@ class Pipeline:
                 # Frame pacer: each present is due one gap after the previous one was *due*, so sleep overshoot and
                 # present time don't accumulate; when late it goes straight away and the schedule restarts from now.
                 # at: the frame's ideal time, in ticks from this tick's (the even beat the camera delivers on).
-                nonlocal next_due
-                if hz > 60:
+                nonlocal next_due, held
+                if pacer is not None:  # Even pacing: at ideal + D, not past the next tick's ideal time
+                    now = time.perf_counter()
+                    t_show = pacer.due(tick_at + at * TICK, now, tick_at + TICK)
+                    if t_show > now:
+                        wait_until(t_show)
+                        held += t_show - now
+                elif hz > 60:
                     now = time.perf_counter()
                     if next_due > now:
                         time.sleep(next_due - now)
@@ -839,9 +860,9 @@ class Pipeline:
                     ov_text, ov_next = overlay_text(), t_ready + 0.25
                 cmd = present(out, ov_text, at=main_at) or early_cmd
             t_shown = time.perf_counter()
-            st.busy_ms.append((t_shown - t0) * 1000)
+            st.busy_ms.append((t_shown - t0 - held) * 1000)
             if sink is not None:
-                st.sink_ms.append((t_shown - t_ready) * 1000)
+                st.sink_ms.append((t_shown - t_ready - held) * 1000)
 
             # Track when each real frame first reaches the screen (timed: when the game time shown reaches it).
             if timed:
@@ -889,6 +910,7 @@ class Pipeline:
                         print(f"[pipeline] interpolation {'ON' if enabled else 'OFF'}")
 
         st.wall_s = time.perf_counter() - t_start
+        st.pacing = paced.summary()
         return st
 
     def _load(self, frame) -> None:

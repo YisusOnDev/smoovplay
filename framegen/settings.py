@@ -112,6 +112,15 @@ SPECS: tuple[Spec, ...] = (
               "It's only on while the game dips, and adds delay then.",
          impact={"picture": "A dip below 30 fps looks like a brief slow-down, not a freeze and a jump.",
                  "speed": "While it dips: 17 to 50 ms more delay, and more graphics card work."}),
+    # framegen/pacing.py EvenPacer, Veyra's fixed-schedule presentation. Off by default until it's been compared in
+    # play: it trades delay for evenness.
+    Spec("even_pacing", "Even pacing", (False, True), False, ON_OFF, group="Smoothness",
+         experimental=True,
+         help="Shows every frame on a fixed beat instead of as soon as it's ready. Without it the in-between frame "
+              "is often up for only a few ms and the real one for about 30: the counter says 60 but motion limps. "
+              "With it, each frame gets its turn. Frames that take longer than 17 ms to make get closer, not exact.",
+         impact={"picture": "Evenly spaced frames: smoother motion at the same frame rate.",
+                 "speed": "About 10 to 15 ms more delay (the time SmoovPlay usually needs for a frame)."}),
     # RIFE: only the model SmoovPlay is tuned and tested with (setup prepares it). interpolator.MODELS has more, for
     # testing with run.py --model; one becomes a choice here once it's tested in real time and setup prepares it.
     # NVIDIA VFG (framegen/vfg.py): offered once the user has set it up on the launcher's Settings page. Its licence
