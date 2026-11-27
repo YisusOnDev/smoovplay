@@ -339,8 +339,30 @@ namespace SmoovPlay
                     done += e.Length;
                     Progress(at + w * done / total, "Unpacking SmoovPlay");
                 }
+                RemoveOld(z);
             }
             Log($"Unpacked {files} files");
+        }
+
+        /// <summary>Files an earlier version put in app\framegen that this one doesn't ship (a removed feature's code
+        /// and pictures, e.g. Looks and Instant replay in 0.3.13-yisus.7) go, and folders that leaves empty. Only
+        /// app\framegen, which is all from the payload: app\models holds the AI model and the engines made for this
+        /// PC's graphics card.</summary>
+        void RemoveOld(ZipArchive z)
+        {
+            string fg = Path.Combine(p.Install, "app", "framegen");
+            if (!Directory.Exists(fg)) return;
+            var shipped = new HashSet<string>(z.Entries.Select(e => Path.GetFullPath(Path.Combine(p.Install, e.FullName))),
+                                              StringComparer.OrdinalIgnoreCase);
+            int gone = 0;
+            foreach (var f in Directory.GetFiles(fg, "*", SearchOption.AllDirectories))
+            {
+                if (shipped.Contains(f) || f.IndexOf("\\__pycache__\\", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                try { File.Delete(f); gone++; } catch (Exception) { }
+            }
+            foreach (var d in Directory.GetDirectories(fg, "*", SearchOption.AllDirectories).OrderByDescending(x => x.Length))
+                try { if (!Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d); } catch (Exception) { }
+            if (gone > 0) Log($"Removed {gone} files an earlier version had and this one doesn't");
         }
 
         void InstallPython(double at, double w)
