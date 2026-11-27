@@ -32,7 +32,9 @@
 > **Este es el fork de YisusOnDev, no el SmoovPlay oficial.** Es SmoovPlay con mejoras que hemos probado jugando,
 > en un PC con AMD Radeon RX 9070 XT (PS5 Remote Play) y en otro con NVIDIA RTX 4090 y capturadora Elgato HD60 X.
 > El programa es de [smoovplay/smoovplay](https://github.com/smoovplay/smoovplay), con licencia MIT; todo el mérito
-> del original es suyo. Este fork se irá actualizando con lo nuevo del original y con nuestras mejoras.
+> del original es suyo. Desde la 0.3.13-yisus.7 este fork va por su cuenta, centrado en **capturadora y PS5 Remote
+> Play**: ya no trae automáticamente lo nuevo del original (lo miramos y traemos lo que nos sirva) y le hemos
+> quitado lo que no usamos: **no tiene Looks ni Instant replay**.
 >
 > ### ⬇ [Descargar SmoovPlay-Setup.exe (versión de este fork)](https://github.com/YisusOnDev/smoovplay/releases/latest)
 >
@@ -125,9 +127,6 @@ There's nothing to install on the console, and it's free and open source.
 - **Works with what you have.** A PS5 streams over Remote Play on your home network, through the open-source chiaki-ng,
   and your controller connects to the PC. An Xbox through its app, or any console through a capture card, are
   Experimental options.
-- **Instant replay.** Press **R** to save the last 30 seconds to 5 minutes as an MP4, at the frame rate you see and
-  with the game's sound. **B** saves a before & after video.
-- **Looks.** Restyle the picture live: start from 14 looks, like Golden hour or Noir, or build your own.
 - **One installer.** It checks your PC, helps fix anything that's off, downloads the AI runtime from official
   sources and walks you through connecting your console. 10 to 20 minutes, once.
 - **Free and open.** MIT licensed. No account, ads or tracking: it only talks to GitHub, for updates.
@@ -201,24 +200,14 @@ must carry SmoovPlay's signature before they run.
 
 ## Make it yours
 
-<p align="center">
-  <img src="docs/media/strip-custom.png" width="100%" alt="Make it yours: the frame rate and upscaler settings with Auto-detect; one beach picture in Original, Golden hour and Noir; and the in-game menu, open on Which look, set to Neon night.">
-</p>
-
 - **Settings apply as you play.** Change the frame rate, upscaler or AI model on the Settings page, or press **M**
   in the video window. **Auto-detect** suggests the best for your PC, with the reason for each.
-- **Looks** put a grade on the picture: a stack of effects applied top to bottom, like a color grading app's nodes.
-  Start from one of 14 (Cinematic, Film, Noir, Retro VHS...), save your own, and share it as a short code.
-- **Instant replay** keeps the last 30 seconds to 5 minutes of what you played (off until you pick a length). Your
-  graphics card's video encoder records it, and saving takes a second or two.
 
 | In the video window | |
 |---|---|
 | **M** | Menu: every setting, live |
 | **F** | Fullscreen, for the lowest delay |
 | **I** | Frame generation off and on, to compare |
-| **R** · **B** | Save the instant replay · a before & after video (**Ctrl+Alt+R** · **Ctrl+Alt+B** from any window) |
-| **K** · **J** | Look off and on · next look (**Shift+J** goes back) |
 | **S** · **U** | Stats overlay (off, minimal, detailed) · next upscaler |
 | **Z** | Fill an ultrawide screen: Fit, Zoom, Stretch or Panorama. Consoles send 16:9 only, so these crop or stretch the same picture: there's no more of the game to show |
 | **L** | Delay test (PS5 Remote Play) |
@@ -262,9 +251,9 @@ The timeline shows 90 fps. At 60 fps there's one AI frame between each pair of r
 - **1080p.** Remote Play arrives at 1080p, so the picture is a little softer than HDMI straight from the console.
 - **HDR** (*Experimental*, Settings → HDR, off by default). For a PS5 streaming in HDR: pick the H.265 HDR codec in
   chiaki-ng, then turn HDR on. **On, shown in SDR** gives the stream its real colours on any monitor. **On, HDR
-  output** keeps it HDR all the way to a monitor with Windows' HDR on, with Looks and RTX VSR off. A contributor has
+  output** keeps it HDR all the way to a monitor with Windows' HDR on, with RTX VSR off. A contributor has
   played a real PS5 HDR stream this way on an HDR monitor, and since 0.3.2 fullscreen keeps Windows' HDR on instead
-  of switching the display to SDR. Instant replay clips are saved in SDR either way.
+  of switching the display to SDR.
 - **A game locked at 30 fps looks uneven?** Set Settings → Smoothness → **Game frame rate** to **30 fps**. On Auto,
   SmoovPlay works the rate out from the stream as it plays. Since 0.3.4 it goes by the picture and rarely misreads a
   30 fps game over a wired connection, but a still or dark scene can still fool it.
@@ -398,8 +387,8 @@ py -3.12 -m venv .venv
 .venv\Scripts\python run.py testdata\clip_1080p60.mp4 --realtime --display
 ```
 
-**[docs/DEVELOPING.md](docs/DEVELOPING.md)** has the rest: every command and tool, settings and hotkeys, how Instant
-replay and Looks work inside, the scheduler, upscaling, NVIDIA VFG, measured results and known limits.
+**[docs/DEVELOPING.md](docs/DEVELOPING.md)** has the rest: every command and tool, settings and hotkeys, the
+scheduler, upscaling, NVIDIA VFG, measured results and known limits.
 
 ## Credits and licences
 
@@ -412,9 +401,7 @@ from [vs-rife](https://github.com/HolyWu/vs-rife) by HolyWu (MIT). FSR 1 shaders
 [chiaki-ng](https://github.com/streetpea/chiaki-ng) (AGPL-3.0). Optional RTX Video Super Resolution and NVIDIA VFG
 come from NVIDIA under NVIDIA's licences and aren't included here.
 
-The Looks page's sample pictures are screenshots from Grand Theft Auto VI and Grand Theft Auto V (© Rockstar Games),
-Cyberpunk 2077 (© CD PROJEKT RED), Forza Horizon 5 (© Microsoft), Gran Turismo 7 (© Sony Interactive Entertainment)
-and skate. (© Electronic Arts), included only to show what a look does. The README's gameplay stills are from
+The README's gameplay stills are from
 Rockstar Games' published Grand Theft Auto VI footage. They belong to their publishers and aren't covered by
 SmoovPlay's MIT licence.
 
