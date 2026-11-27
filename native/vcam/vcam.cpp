@@ -4,16 +4,19 @@
 // "Local\smoovplay-camera" (the layout is in vcam.py's docstring). This filter delivers RGB32 (or NV12) at 60 fps on its own
 // even beat: on each output tick t it takes the newest frame whose ideal time + D is due (D: the header's delay_ms),
 // so the frames go out as evenly as their ideal times, however unevenly SmoovPlay's window showed them. No frame due
-// yet: the last one again (counted). SmoovPlay not running: black.
+// yet: the last one again (counted). SmoovPlay not sending: a note saying so.
 //
-// Registration: regsvr32 /s /n /i:user smoovplay-camera.dll registers it for the current user only (no admin;
-// an OBS run as administrator doesn't see per-user COM classes), /u with the same arguments removes it.
-// DllRegisterServer / DllUnregisterServer do the same for all users (needs admin).
+// Registration: regsvr32 /s /n /i:user smoovplay-camera.dll registers it for the current user only (no admin),
+// /u with the same arguments removes it. An OBS run as administrator doesn't see per-user COM classes: for it,
+// regsvr32 /s /n /i:machine (as administrator) registers it for all users in HKLM\Software\Classes. That is written
+// there explicitly: through HKCR, keys the per-user registration already made would land in HKCU again.
+// DllRegisterServer / DllUnregisterServer write through HKCR as usual.
 //
 // Built on Microsoft's DirectShow base classes (baseclasses/, MIT). MIT licence, as the rest of SmoovPlay.
 
 #include <streams.h>
 #include <initguid.h>
+#include <sddl.h>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -60,12 +63,43 @@ public:
 
     bool Open() {
         if (base_) return true;
-        map_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (DWORD)(kTotal >> 32),
-                                  (DWORD)(kTotal & 0xffffffff), kMapName);
+        map_ = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, kMapName);
+        if (!map_) map_ = Create();
         if (!map_) return false;
         base_ = static_cast<uint8_t*>(MapViewOfFile(map_, FILE_MAP_ALL_ACCESS, 0, 0, kTotal));
         if (!base_) { CloseHandle(map_); map_ = nullptr; return false; }
         return true;
+    }
+
+    // Made here when the camera is opened before SmoovPlay starts. In an OBS run as administrator it would get the
+    // elevated token's default access (administrators only) and SmoovPlay, not elevated, couldn't open it. So it is
+    // this user's (and SYSTEM's and administrators'), labelled medium integrity so SmoovPlay may write to it.
+    static HANDLE Create() {
+        const DWORD hi = (DWORD)(kTotal >> 32), lo = (DWORD)(kTotal & 0xffffffff);
+        PSECURITY_DESCRIPTOR sd = nullptr;
+        HANDLE token = nullptr;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+            DWORD n = 0;
+            GetTokenInformation(token, TokenUser, nullptr, 0, &n);
+            std::vector<uint8_t> buf(n ? n : 1);
+            LPWSTR sid = nullptr;
+            if (n && GetTokenInformation(token, TokenUser, buf.data(), n, &n) &&
+                ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(buf.data())->User.Sid, &sid)) {
+                std::wstring sddl = std::wstring(L"D:P(A;;GA;;;") + sid + L")(A;;GA;;;SY)(A;;GA;;;BA)S:(ML;;NW;;;ME)";
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &sd, nullptr);
+                LocalFree(sid);
+            }
+            CloseHandle(token);
+        }
+        HANDLE h = nullptr;
+        if (sd) {
+            SECURITY_ATTRIBUTES sa = {sizeof(sa), sd, FALSE};
+            h = CreateFileMappingW(INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE, hi, lo, kMapName);
+            LocalFree(sd);
+        }
+        if (!h)  // e.g. a low-integrity process, which may not label it medium: default access, as before
+            h = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, hi, lo, kMapName);
+        return h;
     }
 
     void Close() {
@@ -605,21 +639,20 @@ int g_cTemplates = sizeof(g_Templates) / sizeof(g_Templates[0]);
 STDAPI DllRegisterServer() { return Register(true); }
 STDAPI DllUnregisterServer() { return Register(false); }
 
-// regsvr32 /n /i:user: for the current user only (HKCU\Software\Classes), no admin
+// regsvr32 /n /i:user: for the current user only (HKCU\Software\Classes), no admin.
+// regsvr32 /n /i:machine: for all users (HKLM\Software\Classes), as administrator.
 STDAPI DllInstall(BOOL install, LPCWSTR cmd) {
     bool user = cmd && _wcsicmp(cmd, L"user") == 0;
+    bool machine = cmd && _wcsicmp(cmd, L"machine") == 0;
+    if (!user && !machine) return E_INVALIDARG;
     HKEY classes = nullptr;
-    if (user) {
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes", 0, nullptr, 0, KEY_ALL_ACCESS, nullptr,
-                            &classes, nullptr) != ERROR_SUCCESS)
-            return E_FAIL;
-        RegOverridePredefKey(HKEY_CLASSES_ROOT, classes);
-    }
+    if (RegCreateKeyExW(user ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE, L"Software\\Classes", 0, nullptr, 0,
+                        KEY_ALL_ACCESS, nullptr, &classes, nullptr) != ERROR_SUCCESS)
+        return E_ACCESSDENIED;
+    RegOverridePredefKey(HKEY_CLASSES_ROOT, classes);
     HRESULT hr = Register(install != FALSE);
-    if (user) {
-        RegOverridePredefKey(HKEY_CLASSES_ROOT, nullptr);
-        RegCloseKey(classes);
-    }
+    RegOverridePredefKey(HKEY_CLASSES_ROOT, nullptr);
+    RegCloseKey(classes);
     return hr;
 }
 

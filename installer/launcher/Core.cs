@@ -54,6 +54,8 @@ namespace SmoovPlay
             var opts = Options.Parse(args);
             if (args.Length == 2 && args[0] == "--check-signature")  // testing the Visual C++ download check
                 return SystemCheck.SignedByMicrosoft(Path.GetFullPath(args[1])) ? 0 : 1;
+            if (opts.CameraAdmin != null)  // run as administrator by Camera.Elevated
+                return Camera.Machine(opts.CameraAdmin == "off" ? null : opts.CameraAdmin);
             if (opts.Uninstall)
                 return Uninstaller.Run(opts.Yes);
             if (opts.Unattended)
@@ -128,6 +130,7 @@ namespace SmoovPlay
     {
         public bool Uninstall, Unattended, NoShortcuts, SkipPrepare, Yes, Update;
         public string Dir, Diagnostics, Page;
+        public string CameraAdmin;  // --camera-admin <dll>|off: SmoovPlay Camera for an OBS run as administrator
         public int Wait;  // --wait: a process to let close first (the launcher an update came from)
 
         public static Options Parse(string[] args)
@@ -147,6 +150,7 @@ namespace SmoovPlay
                     case "--dir": if (i + 1 < args.Length) o.Dir = Path.GetFullPath(args[++i]); break;
                     case "--diagnostics": if (i + 1 < args.Length) o.Diagnostics = Path.GetFullPath(args[++i]); break;
                     case "--page": if (i + 1 < args.Length) o.Page = args[++i].ToLowerInvariant(); break;
+                    case "--camera-admin": if (i + 1 < args.Length) o.CameraAdmin = args[++i]; break;
                 }
             }
             return o;
@@ -645,7 +649,8 @@ namespace SmoovPlay
         }
     }
 
-    /// <summary>SmoovPlay Camera's DLL (native/vcam) and its per-user COM registration.</summary>
+    /// <summary>SmoovPlay Camera's DLL (native/vcam) and its COM registration: per user (no admin), and optionally
+    /// for all users too, which an OBS run as administrator needs (elevated processes ignore per-user COM classes).</summary>
     static class Camera
     {
         public const string Folder = "camera";
@@ -653,10 +658,112 @@ namespace SmoovPlay
         const string Instance = @"Software\Classes\CLSID\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\Instance\SmoovPlay Camera";
         public static string DllName { get { return "smoovplay-camera-" + BuildInfo.Version + ".dll"; } }
 
-        /// <summary>regsvr32 /n /i:user (DllInstall "user"): HKCU only, no admin. Returns its exit code.</summary>
-        public static int Regsvr32(string dll, bool register)
+        /// <summary>The all-users copy lives where only administrators can write: processes run as administrator
+        /// load it, so a copy in the user's own folders would let anything running as the user get admin rights.</summary>
+        public static string MachineFolder
         {
-            string args = "/s " + (register ? "" : "/u ") + "/n /i:user \"" + dll + "\"";
+            get
+            {
+                string pf = Environment.GetEnvironmentVariable("ProgramW6432");
+                if (string.IsNullOrEmpty(pf)) pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                return Path.Combine(pf, "SmoovPlay Camera");
+            }
+        }
+
+        static RegistryKey Hklm() { return RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64); }
+
+        /// <summary>The DLL the all-users registration points at, or null if there's none.</summary>
+        public static string MachineDll()
+        {
+            try
+            {
+                using (var hklm = Hklm())
+                using (var k = hklm.OpenSubKey(@"Software\Classes\CLSID\" + Clsid + @"\InprocServer32"))
+                    return k == null ? null : k.GetValue(null) as string;
+            }
+            catch (Exception) { return null; }
+        }
+
+        /// <summary>Is the all-users registration there, and is it this version's DLL?</summary>
+        public static bool MachineCurrent()
+        {
+            string dll = MachineDll();
+            return dll != null && File.Exists(dll) && string.Equals(Path.GetFileName(dll), DllName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Runs this exe as administrator (one UAC prompt) to add (dll = this install's camera DLL) or
+        /// remove (null) the all-users registration. Returns its exit code; Cancelled if the prompt was declined.</summary>
+        public const int Cancelled = -1223;
+        public static int Elevated(string dll)
+        {
+            string exe = Assembly.GetExecutingAssembly().Location;
+            var psi = new ProcessStartInfo(exe, "--camera-admin " + (dll == null ? "off" : "\"" + dll + "\""))
+            { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
+            try
+            {
+                using (var pr = Process.Start(psi))
+                {
+                    if (!pr.WaitForExit(60000)) return -1;
+                    return pr.ExitCode;
+                }
+            }
+            catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223) { return Cancelled; }
+            catch (Exception) { return -2; }
+        }
+
+        /// <summary>As administrator (--camera-admin): copies `dll` into MachineFolder and registers that copy for all
+        /// users, or with dll = null removes the registration and the copies. Older copies that OBS still has open
+        /// are deleted at the next restart.</summary>
+        public static int Machine(string dll)
+        {
+            string dir = MachineFolder;
+            string keep = null;
+            int code = 0;
+            if (dll != null)
+            {
+                if (!File.Exists(dll)) return 3;
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    keep = Path.Combine(dir, Path.GetFileName(dll));
+                    if (!File.Exists(keep)) File.Copy(dll, keep);  // same name: same version, maybe loaded
+                }
+                catch (Exception) { return 4; }
+                code = Regsvr32(keep, true, "machine");
+            }
+            else
+            {
+                string old = MachineDll();
+                if (old != null && File.Exists(old)) Regsvr32(old, false, "machine");
+                try
+                {
+                    using (var hklm = Hklm())
+                    {
+                        hklm.DeleteSubKeyTree(@"Software\Classes\CLSID\" + Clsid, false);
+                        hklm.DeleteSubKeyTree(Instance, false);
+                    }
+                }
+                catch (Exception) { code = 5; }
+            }
+            if (Directory.Exists(dir))
+            {
+                foreach (var f in Directory.GetFiles(dir))
+                    if (keep == null || !string.Equals(f, keep, StringComparison.OrdinalIgnoreCase))
+                        try { File.Delete(f); } catch (Exception) { MoveFileEx(f, null, 4); }  // MOVEFILE_DELAY_UNTIL_REBOOT
+                if (keep == null)
+                    try { Directory.Delete(dir); } catch (Exception) { MoveFileEx(dir, null, 4); }
+            }
+            return code;
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        static extern bool MoveFileEx(string from, string to, int flags);
+
+        /// <summary>regsvr32 /n /i:user (DllInstall "user"): HKCU only, no admin; /i:machine: HKLM, as administrator.
+        /// Returns its exit code.</summary>
+        public static int Regsvr32(string dll, bool register, string scope = "user")
+        {
+            string args = "/s " + (register ? "" : "/u ") + "/n /i:" + scope + " \"" + dll + "\"";
             try
             {
                 using (var pr = Process.Start(new ProcessStartInfo(
@@ -701,6 +808,7 @@ namespace SmoovPlay
                 try { if (File.Exists(lnk)) File.Delete(lnk); } catch (Exception) { }
             try { Registry.CurrentUser.DeleteSubKeyTree(Key, false); } catch (Exception) { }
             Camera.Unregister();
+            if (Camera.MachineDll() != null) Camera.Elevated(null);  // the all-users one (OBS as administrator): asks Windows
             // Only what setup created is removed, then the folder itself if that leaves it empty. This exe is inside
             // it, so a short-lived cmd does the deleting once we've exited.
             var cmd = new StringBuilder("/c ping 127.0.0.1 -n 3 > nul");

@@ -69,8 +69,10 @@
 > - **Solo vídeo:** el sonido del juego se captura como siempre. La imagen de la cámara va 60 ms por detrás de la
 >   de tu pantalla, así que en OBS dale al sonido del juego un *desfase de sincronización* de +60 ms (Propiedades
 >   avanzadas de audio).
-> - **No funciona con OBS abierto como administrador** (Windows no le deja ver cámaras instaladas por usuario).
->   Abre OBS normal.
+> - **¿Abres OBS como administrador?** Windows esconde a los programas abiertos como administrador las cámaras
+>   instaladas solo para tu usuario. En el launcher, *Settings → Streaming → OBS as administrator → Turn on*
+>   (Windows pide permiso una vez) y reinicia OBS. Si abres OBS normal no hace falta. Tras actualizar SmoovPlay
+>   ese botón puede decir *Update*: la versión anterior sigue funcionando, pero conviene pulsarlo.
 > - Lo que ves tú en tu pantalla no cambia, y no cuesta nada mientras OBS no tenga la cámara abierta.
 >
 > **Avisos (léelos):**

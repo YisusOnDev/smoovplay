@@ -372,8 +372,8 @@ SPECS: tuple[Spec, ...] = (
     Spec("vcam", "SmoovPlay Camera", (True, False), True, ON_OFF, group="Streaming",
          help="For streaming: SmoovPlay's frames as a camera for OBS. Add a Video Capture Device, pick SmoovPlay "
               "Camera, Buffering: Enable. Every frame arrives, evenly, without the menu or messages, even in "
-              "fullscreen. The picture is 60 ms behind: give the game's sound +60 ms sync offset in OBS. Not for "
-              "OBS run as administrator.",
+              "fullscreen. The picture is 60 ms behind: give the game's sound +60 ms sync offset in OBS. OBS run as "
+              "administrator: turn on OBS as administrator in the launcher.",
          impact={"picture": "The stream gets every frame, evenly; nothing changes on your screen.",
                  "speed": "None until an app opens the camera; then about 1 ms a frame."}),
 )

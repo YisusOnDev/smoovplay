@@ -174,3 +174,45 @@ def test_on_by_default_off_when_set_off_and_hdr_turns_it_off(ring_name):
         sink = CameraSink(Settings({"vcam": True}), name=ring_name)
         sink.write(np.zeros((32, 64, 3), np.float16))
         assert sink.off_why and "HDR" in sink.off_why and sink.ring is None
+
+
+def _admin_only_map(name: str, size: int = 1 << 20):
+    """The shared memory as an OBS run as administrator made it with SmoovPlay Camera before 0.3.13-yisus.5: its
+    elevated token's default access, administrators and SYSTEM only (a token that isn't elevated is refused)."""
+    import ctypes
+    from ctypes import wintypes as W
+    adv, k32 = ctypes.WinDLL("advapi32"), ctypes.WinDLL("kernel32")
+    sd = ctypes.c_void_p()
+    adv.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [W.LPCWSTR, W.DWORD,
+                                                                         ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+    assert adv.ConvertStringSecurityDescriptorToSecurityDescriptorW("D:P(A;;GA;;;BA)(A;;GA;;;SY)", 1,
+                                                                    ctypes.byref(sd), None)
+
+    class SA(ctypes.Structure):
+        _fields_ = [("n", W.DWORD), ("sd", ctypes.c_void_p), ("inherit", W.BOOL)]
+
+    sa = SA(ctypes.sizeof(SA), sd, False)
+    k32.CreateFileMappingW.restype = W.HANDLE
+    k32.CreateFileMappingW.argtypes = [W.HANDLE, ctypes.c_void_p, W.DWORD, W.DWORD, W.DWORD, W.LPCWSTR]
+    k32.CloseHandle.argtypes = [W.HANDLE]
+    h = k32.CreateFileMappingW(W.HANDLE(-1), ctypes.byref(sa), 4, 0, size, name)
+    assert h
+    return lambda: k32.CloseHandle(h)
+
+
+@pytest.mark.skipif(not WINDOWS, reason="the camera is Windows only")
+def test_a_camera_made_by_an_admin_obs_never_stops_play(ring_name, capsys, monkeypatch):
+    import ctypes
+    if ctypes.windll.shell32.IsUserAnAdmin():
+        pytest.skip("run elevated: an administrators-only memory opens fine")
+    close = _admin_only_map(ring_name)
+    sink = CameraSink(Settings({"vcam": True}), name=ring_name)
+    f = np.zeros((32, 64, 3), np.uint8)
+    sink.write(f)  # access denied: said once, no exception
+    sink.write(f)
+    assert sink.ring is None and capsys.readouterr().out.count("can't open") == 1
+    close()  # OBS closed: the memory is gone, and the next try makes it afresh
+    monkeypatch.setattr(sink, "_retry_at", 0.0)
+    sink.write(f)
+    assert sink.ring is not None and "opened" in capsys.readouterr().out
+    sink.close()

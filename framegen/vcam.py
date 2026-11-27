@@ -218,6 +218,8 @@ class CameraSink:
         self.late_ms: list[float] = []  # how long after its ideal time each frame was written (vs DELAY_MS)
         self.off_why: str | None = None  # why it can't run (said once)
         self._reading = False
+        self._retry_at = 0.0  # time.monotonic() before which not to try opening the shared memory again
+        self._denied = False  # it couldn't be opened (said once)
 
     def _on(self) -> bool:
         return sys.platform == "win32" and bool(getattr(self.settings, "vcam", False)) and self.off_why is None
@@ -234,7 +236,24 @@ class CameraSink:
             return self._cant(f"SmoovPlay Camera: {w}x{h} is bigger than it takes ({MAX_W}x{MAX_H}); the camera is off")
         if self.ring is None or (self.ring.w, self.ring.h) != (w, h):
             if self.ring is None:
-                self.ring = Ring(self.name)
+                if time.monotonic() < self._retry_at:
+                    return None
+                try:
+                    self.ring = Ring(self.name)
+                except OSError as e:
+                    # Made by a camera that gave only administrators access: an OBS run as administrator, with
+                    # SmoovPlay Camera from before 0.3.13-yisus.5, that opened it before SmoovPlay played. It stays
+                    # like that while OBS has the camera open. Never a reason to stop playing: try again shortly.
+                    self._retry_at = time.monotonic() + 2.0
+                    if not self._denied:
+                        self._denied = True
+                        print(f"[camera] can't open SmoovPlay Camera's shared memory ({e}). If OBS runs as "
+                              "administrator: in the launcher, Settings > Streaming > OBS as administrator, press "
+                              "Update (or Turn on), then close OBS and open it again", flush=True)
+                    return None
+                if self._denied:
+                    print("[camera] SmoovPlay Camera's shared memory opened", flush=True)
+                    self._denied = False
             self.ring.begin(w, h)
             print(f"[camera] on: {w}x{h} at {FPS} fps, {DELAY_MS} ms behind the game (in OBS: Video Capture Device "
                   f"'SmoovPlay Camera', Buffering Enable; the game's sound gets a sync offset of +{DELAY_MS} ms)",

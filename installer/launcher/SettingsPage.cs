@@ -357,6 +357,12 @@ namespace SmoovPlay
                 rows.Children.Add(row.Element);
                 sec.Rows.Add(row);
             }
+            var admin = group == "Streaming" ? CameraAdminRow() : null;
+            if (admin != null)
+            {
+                rows.Children.Add(Rule());
+                rows.Children.Add(admin);
+            }
             var body = new StackPanel();
             body.Children.Add(new Border { Height = 1, Background = R("Line") });
             body.Children.Add(rows);
@@ -378,6 +384,71 @@ namespace SmoovPlay
                 if (now) SnapLater("settings-" + group.ToLowerInvariant().Replace(' ', '-'), 400);
             };
             return sec;
+        }
+
+        /// <summary>Streaming: SmoovPlay Camera for an OBS run as administrator too (Core.cs Camera.Machine). The
+        /// launcher's own row (no setting behind it): it needs Windows' permission once, so it's a button, not a switch.
+        /// None in a copy without the camera DLL (a developer's).</summary>
+        FrameworkElement CameraAdminRow()
+        {
+            string dll = Path.Combine(paths.Install, Camera.Folder, Camera.DllName);
+            if (!File.Exists(dll)) return null;
+            var g = new Grid { Margin = new Thickness(18, 14, 18, 14) };
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            g.Children.Add(new TextBlock
+            {
+                Text = "OBS as administrator", FontSize = 14, FontWeight = FontWeights.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0),
+            });
+            var btn = new Button { Style = S("Secondary"), Height = 34, Padding = new Thickness(14, 0, 14, 0), FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
+            AutomationProperties.SetAutomationId(btn, "SetCameraAdmin");
+            Grid.SetColumn(btn, 1);
+            g.Children.Add(btn);
+            var text = new StackPanel { Margin = new Thickness(0, 6, 0, 0) };
+            text.Children.Add(new TextBlock
+            {
+                Style = S("Small"),
+                Text = "Windows hides cameras added for one user from apps run as administrator. This adds SmoovPlay Camera " +
+                       "for all users too, so an OBS run as administrator lists it (Windows asks for permission). " +
+                       "Not needed if you open OBS normally.",
+            });
+            var state = new TextBlock { Style = S("Small"), Foreground = R("Text"), Margin = new Thickness(0, 6, 0, 0) };
+            text.Children.Add(state);
+            Grid.SetRow(text, 1);
+            Grid.SetColumnSpan(text, 2);
+            g.Children.Add(text);
+
+            Action refresh = () =>
+            {
+                bool on = Camera.MachineDll() != null, current = Camera.MachineCurrent();
+                btn.Content = !on ? "Turn on" : current ? "Turn off" : "Update";
+                AutomationProperties.SetName(btn, "OBS as administrator: " + btn.Content);
+                state.Text = !on ? "Off." : current ? "On: an OBS run as administrator lists SmoovPlay Camera."
+                                                    : "On, from an earlier SmoovPlay. Update brings it up to date.";
+            };
+            refresh();
+            btn.Click += (s, e) =>
+            {
+                bool turnOff = Camera.MachineCurrent();
+                btn.IsEnabled = false;
+                state.Text = "Waiting for Windows' permission…";
+                Task.Run(() =>
+                {
+                    int code = Camera.Elevated(turnOff ? null : dll);
+                    OnUi(() =>
+                    {
+                        btn.IsEnabled = true;
+                        refresh();
+                        if (code == Camera.Cancelled) state.Text += " Nothing changed: Windows' permission was declined.";
+                        else if (code != 0) state.Text += " That didn't work (code " + code + ").";
+                        else if (!turnOff) state.Text += " If OBS was open, restart it.";
+                    });
+                });
+            };
+            return g;
         }
 
         /// <summary>The sections in one column, or two once there's room (on a size change, only when that flips).</summary>
