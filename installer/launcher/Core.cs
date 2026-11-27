@@ -873,10 +873,30 @@ namespace SmoovPlay
                 File.WriteAllText(Marker(p), pr.Id + " " + pr.StartTime.Ticks);
             }
             catch (Exception) { }
+            NoThrottling(pr);
             log("[launcher] started chiaki-ng" + (renderer == "opengl"
                 ? " (drawing with OpenGL this time: chiaki-ng's Vulkan has crashed on AMD and Intel graphics; SmoovPlay shows the picture)"
                 : ""));
             return true;
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        struct PowerThrottling { public uint Version, ControlMask, StateMask; }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetProcessInformation(IntPtr process, int infoClass, ref PowerThrottling info, uint size);
+
+        /// <summary>chiaki-ng decodes the stream while its window is minimised behind SmoovPlay's, which is when
+        /// Windows 11 may slow a process down to save power (EcoQoS) and ignore its timer requests: asked not to, as
+        /// SmoovPlay asks for itself (framegen/winutil.py no_throttling).</summary>
+        static void NoThrottling(Process pr)
+        {
+            try
+            {
+                var state = new PowerThrottling { Version = 1, ControlMask = 0x1 | 0x4, StateMask = 0 };
+                SetProcessInformation(pr.Handle, 4, ref state, (uint)System.Runtime.InteropServices.Marshal.SizeOf(state));
+            }
+            catch (Exception) { }  // older Windows: nothing to turn off
         }
 
         /// <summary>What chiaki-ng draws its own window with (CHIAKI_FRAMETAP_RENDERER, our chiaki-ng's switch, for that

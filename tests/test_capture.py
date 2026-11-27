@@ -1,6 +1,8 @@
 """Capture cards (framegen.capture): reading DirectShow's listings, picking a format, converting raw frames, and the
 whole source with a raw video file standing in for a card. CPU only: no card, no GPU."""
 
+import time
+
 import cv2
 import numpy as np
 import pytest
@@ -121,7 +123,7 @@ def test_pick_prefers_raw_at_the_size_and_rate_asked_for():
 def test_open_options():
     o = c.open_options(c.Mode("nv12", True, 1920, 1080, 59.94, 59.94))
     assert o["video_size"] == "1920x1080" and o["pixel_format"] == "nv12" and o["framerate"] == "59.94"
-    assert int(o["rtbufsize"]) == 1920 * 1080 * 3 // 2 * 4
+    assert int(o["rtbufsize"]) == 1920 * 1080 * 3 // 2 * 10
     assert c.open_options(c.Mode("mjpeg", False, 1920, 1080, 30, 60))["vcodec"] == "mjpeg"
 
 
@@ -356,6 +358,32 @@ def test_frames_keep_the_cards_numbers_when_the_queue_drops_some(tmp_path):
     seqs = [t.extra["seq"] for t in ticks]
     assert len(ticks) < len(frames)
     assert seqs == sorted(set(seqs)) and seqs == [round(t.t_source * 240) for t in ticks]
+
+
+def test_frames_lost_before_us_are_counted_from_the_cards_timestamps(tmp_path, monkeypatch):
+    """FFmpeg's DirectShow queue drops frames without a word when our reader is held up: the card's timestamps
+    jump. Counted as lost, and numbered past, so seq stays in step with the card."""
+    import av
+    frames = [_blocks(seed=s)[0] for s in range(60, 66)]
+    h, w = frames[0].shape[:2]
+    stamps = [0, 1, 2, 4, 5, 8]  # in 60ths of a second: 3, 6 and 7 never arrived
+
+    def fake_frames(self):
+        for k, n in enumerate(stamps):
+            yield frames[k], time.perf_counter(), n / 60
+
+    monkeypatch.setattr(c.CardSource, "_frames", fake_frames)
+    container = av.open(_raw_file(tmp_path, frames), format="rawvideo",
+                        options={"video_size": f"{w}x{h}", "pixel_format": "nv12", "framerate": "60"})
+    src = c.CardSource(container, "a card", live=True, device="cpu", colour=(False, False))
+    ticks = []
+    for t in src:
+        ticks.append(t)
+        if len(ticks) == len(stamps):
+            break
+    src.close()
+    assert src.lost == 3
+    assert [t.extra["seq"] for t in ticks] == stamps
 
 
 # ---- CUDA graph capture: the card's GPU work waits for it, as the Remote Play reader's does

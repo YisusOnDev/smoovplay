@@ -767,9 +767,10 @@ def main() -> int:
 
     ticks = iter(src)  # one stream for every session, so a restart doesn't reconnect or reopen anything
     if sink.sinks:  # playing on screen: keep frames on time when other programs are busy
-        from framegen.winutil import boost_gpu, boost_thread, keep_screen_on
+        from framegen.winutil import boost_gpu, boost_thread, keep_screen_on, no_throttling
         print(f"[run] scheduling: MMCSS {'on' if boost_thread() else 'off'}, "
               f"GPU priority {'high' if boost_gpu() else 'normal'}, "
+              f"power throttling {'off' if no_throttling() else 'as Windows decides'}, "
               f"screen kept on {'yes' if keep_screen_on() else 'no'}")  # (a controller isn't input to Windows)
     try:
         while True:

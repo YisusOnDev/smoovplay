@@ -193,6 +193,31 @@ def keep_screen_on(on: bool = True) -> bool:
         return False
 
 
+_PROCESS_POWER_THROTTLING = 4  # ProcessPowerThrottling, for SetProcessInformation
+_THROTTLE_SPEED, _THROTTLE_TIMER = 0x1, 0x4  # EXECUTION_SPEED (EcoQoS), IGNORE_TIMER_RESOLUTION
+
+
+class _PowerThrottling(ctypes.Structure):
+    _fields_ = [("Version", ctypes.c_uint32), ("ControlMask", ctypes.c_uint32), ("StateMask", ctypes.c_uint32)]
+
+
+def no_throttling() -> bool:
+    """Tells Windows not to slow this process down to save power (EcoQoS) and to keep its timer requests when its
+    window isn't in front. Windows 11 does both to processes it decides are in the background, e.g. once another
+    window is clicked: Veyra saw a game go from 60 to 22 fps that way. Returns whether it worked."""
+    if _boost_off():
+        return False
+    try:
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        k32.SetProcessInformation.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        state = _PowerThrottling(1, _THROTTLE_SPEED | _THROTTLE_TIMER, 0)  # controlled, and off
+        return bool(k32.SetProcessInformation(k32.GetCurrentProcess(), _PROCESS_POWER_THROTTLING,
+                                              ctypes.byref(state), ctypes.sizeof(state)))
+    except (OSError, AttributeError):
+        return False
+
+
 def boost_gpu() -> bool:
     """Raises this process's GPU scheduling priority to high (what games and video players use), so other
     programs' GPU work doesn't delay ours. Returns whether it worked."""

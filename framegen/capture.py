@@ -391,9 +391,12 @@ MAX_SOUND_LATE_S = 0.080  # the most sound_late_s() takes off (or adds to) the s
 CALIBRATION_N = 100  # packets of each (about 2 s) that sound_late_s() is measured on, once, at the start
 
 
-def open_options(mode: Mode, fps: float = 60.0, queue_frames: int = 4) -> dict:
-    """av.open options for a mode. rtbufsize caps DirectShow's own queue at a few frames: it only fills when we fall
-    behind, and frames dropped there are counted by FFmpeg ("real-time buffer too full")."""
+def open_options(mode: Mode, fps: float = 60.0, queue_frames: int = 10) -> dict:
+    """av.open options for a mode. rtbufsize sizes DirectShow's own queue, which fills only while our reader thread
+    is held up (e.g. its colour conversion waiting behind the AI model on the GPU). FFmpeg starts dropping frames
+    there well before it's full, without a word to us: at 4 frames that was already after about two, a hitch every
+    time the reader paused for ~35 ms. 10 rides those out; how far behind we play is still set by our own queue
+    (CardSource.queue_size), and frames lost anyway show as gaps in the card's timestamps (CardSource.lost)."""
     rate = min(fps, mode.fps_max) if mode.fps_max >= fps - 0.5 else mode.fps_max
     opts = {"video_size": f"{mode.w}x{mode.h}", "framerate": f"{rate:g}",
             "rtbufsize": str(int(mode.w * mode.h * BYTES_PER_PIXEL.get(mode.fmt, 3) * queue_frames))}
@@ -490,6 +493,7 @@ class CardSource:
         self.bt709, self.full_range = (self.h >= 720, range_hint == "pc") if colour == "auto" else colour
         self.info = source_info("capture", hz=self.fps, name=name)
         self.dropped = 0
+        self.lost = 0  # a card's frames lost before they reached us: gaps in its timestamps (_reader)
         self.damaged = 0  # frames the decoder couldn't read, skipped (_damaged)
         self._damaged_since: float | None = None  # when the current run of them began
         self._stop = False
@@ -639,11 +643,25 @@ class CardSource:
         from .io import Tick
         if not self.live:
             self._go.wait()
+        else:  # on time when other programs are busy, as the pipeline's thread and the frame tap's reader are
+            from .winutil import boost_thread
+            boost_thread()
         t0, n = time.perf_counter(), 0
+        prev_src = None
         try:
             for frame, t_arrival, t_src in self._frames():
                 if self._stop:
                     break
+                # Frames lost before they reached us (FFmpeg's DirectShow queue, or the card) leave a gap in the
+                # card's own timestamps: counted, and numbered past, so seq (Game frame rate 30 fps, StreamClock)
+                # stays in step with the card.
+                if self.live and t_src is not None:
+                    if prev_src is not None and 0 < t_src - prev_src < 1.0:
+                        gap = round((t_src - prev_src) * self.fps) - 1
+                        if gap > 0:
+                            self.lost += gap
+                            n += gap
+                    prev_src = t_src
                 if not self.live and (wait := t0 + n / self.fps - time.perf_counter()) > 0:
                     time.sleep(wait)  # a card delivers on the HDMI clock
                     t_arrival = time.perf_counter()
@@ -877,6 +895,7 @@ class CardSource:
             self.player.close()
             self._report_sound(final=True)
         print(f"[capture] dropped frames: {self.dropped}"
+              + (f", lost before SmoovPlay got them (gaps in the card's timestamps): {self.lost}" if self.live else "")
               + (f", damaged frames from the card skipped: {self.damaged}" if self.damaged else ""))
 
 
