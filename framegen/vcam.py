@@ -220,6 +220,8 @@ class CameraSink:
         self._reading = False
         self._retry_at = 0.0  # time.monotonic() before which not to try opening the shared memory again
         self._denied = False  # it couldn't be opened (said once)
+        self._copy: _GpuCopy | None = None  # NVIDIA: CUDA frames copied off the GPU's queue
+        self._sync_copy = False  # _GpuCopy couldn't start: CUDA frames copied with .cpu() instead
 
     def _on(self) -> bool:
         return sys.platform == "win32" and bool(getattr(self.settings, "vcam", False)) and self.off_why is None
@@ -230,11 +232,13 @@ class CameraSink:
                 self.close()
             return None
         h, w = frame.shape[:2]
-        if frame.dtype != np.uint8 or frame.ndim != 3 or frame.shape[2] != 3:
+        # a numpy array (AMD, Intel, CPU) or a torch tensor (NVIDIA: a CUDA one); torch.uint8 isn't np.uint8
+        if str(frame.dtype) not in ("uint8", "torch.uint8") or frame.ndim != 3 or frame.shape[2] != 3:
             return self._cant("SmoovPlay Camera: HDR output isn't supported yet; the camera is off")
         if w > MAX_W or h > MAX_H:
             return self._cant(f"SmoovPlay Camera: {w}x{h} is bigger than it takes ({MAX_W}x{MAX_H}); the camera is off")
         if self.ring is None or (self.ring.w, self.ring.h) != (w, h):
+            self._stop_copy()  # no copy may still be writing while the ring starts over
             if self.ring is None:
                 if time.monotonic() < self._retry_at:
                     return None
@@ -270,11 +274,29 @@ class CameraSink:
             self._reading = True
         if ideal is None:
             ideal = time.perf_counter()
-        host = frame.cpu().numpy() if hasattr(frame, "cpu") else frame
+        if getattr(frame, "is_cuda", False) and not self._sync_copy:
+            if self._copy is None:
+                try:
+                    self._copy = _GpuCopy(self, frame)
+                except Exception as e:  # no page-locked memory, say: the copy that waits, as a fallback
+                    print(f"[camera] copying on the GPU's queue isn't possible ({e}); copying directly", flush=True)
+                    self._sync_copy = True
+            if self._copy is not None:
+                self._copy.push(frame, ideal)
+                return None
+        self._push(frame.cpu().numpy() if hasattr(frame, "cpu") else frame, ideal)
+        return None
+
+    def _push(self, host: np.ndarray, ideal: float) -> None:
+        """Writes one frame into the ring (the pipeline's thread, or _GpuCopy's)."""
         self.ring.push(host, self.ring.to_qpc(ideal))
         self.sent += 1
         self.late_ms.append((time.perf_counter() - ideal) * 1000)
-        return None
+
+    def _stop_copy(self) -> None:
+        if self._copy is not None:
+            self._copy.close()
+            self._copy = None
 
     def _cant(self, why: str):
         self.off_why = why
@@ -291,6 +313,8 @@ class CameraSink:
             lm = np.array(self.late_ms)
             line += (f", written {np.median(lm):.0f} ms after their time (p99 {np.percentile(lm, 99):.0f}; "
                      f"{np.mean(lm > DELAY_MS) * 100:.1f}% later than the camera's {DELAY_MS} ms)")
+        if self._copy is not None and self._copy.dropped:
+            line += f"; {self._copy.dropped} left out (the GPU copies fell behind)"
         if self.ring is not None:
             delivered, repeats, late = self.ring.counts()
             if delivered:
@@ -298,6 +322,10 @@ class CameraSink:
         return line
 
     def close(self) -> None:
+        copy = self._copy
+        self._stop_copy()
+        if copy is not None:
+            self._copy = copy  # for the summary's count; its thread has stopped
         if self.ring is not None:
             line = self.summary()
             if line:
@@ -305,4 +333,62 @@ class CameraSink:
             self.ring.end()
             self.ring.close()
             self.ring = None
+        self._copy = None
         self._reading = False
+
+
+class _GpuCopy:
+    """NVIDIA: a CUDA frame copied to the camera without holding up the GPU's queue.
+
+    A plain .cpu() waits for everything queued on the GPU so far before it returns, so on every frame the pipeline
+    would stop until the GPU caught up, losing the overlap of the CPU preparing the next frame while the GPU works.
+    Instead the copy is queued on the frame's stream into page-locked memory (one of BUFFERS), an event after it, and
+    a thread waits for the event and writes the slot. The frame's buffer can be reused at once: later work on that
+    stream runs after the copy. All buffers still busy (the thread fell behind): the frame is left out, counted."""
+
+    BUFFERS = 3
+
+    def __init__(self, sink: CameraSink, frame) -> None:
+        import queue
+        import threading
+
+        import torch
+        self.torch, self.sink, self.dropped = torch, sink, 0
+        self.bufs = [torch.empty(tuple(frame.shape), dtype=torch.uint8, pin_memory=True) for _ in range(self.BUFFERS)]
+        self.free: queue.Queue = queue.Queue()
+        for i in range(self.BUFFERS):
+            self.free.put(i)
+        self.jobs: queue.Queue = queue.Queue()
+        self._failed = False
+        self.thread = threading.Thread(target=self._run, name="camera copy", daemon=True)
+        self.thread.start()
+
+    def push(self, frame, ideal: float) -> None:
+        import queue
+        try:
+            i = self.free.get_nowait()
+        except queue.Empty:
+            self.dropped += 1
+            return
+        stream = self.torch.cuda.current_stream(frame.device)
+        self.bufs[i].copy_(frame, non_blocking=True)
+        done = self.torch.cuda.Event()
+        done.record(stream)
+        self.jobs.put((i, done, ideal))
+
+    def _run(self) -> None:
+        while (job := self.jobs.get()) is not None:
+            i, done, ideal = job
+            try:
+                done.synchronize()
+                self.sink._push(self.bufs[i].numpy(), ideal)
+            except Exception as e:  # never the pipeline's problem
+                if not self._failed:
+                    self._failed = True
+                    print(f"[camera] a frame couldn't be copied: {e}", flush=True)
+            finally:
+                self.free.put(i)
+
+    def close(self) -> None:
+        self.jobs.put(None)
+        self.thread.join(timeout=2)

@@ -216,3 +216,37 @@ def test_a_camera_made_by_an_admin_obs_never_stops_play(ring_name, capsys, monke
     sink.write(f)
     assert sink.ring is not None and "opened" in capsys.readouterr().out
     sink.close()
+
+
+@pytest.mark.skipif(not WINDOWS, reason="the camera is Windows only")
+def test_torch_frames_are_sent_not_taken_for_hdr(ring_name):
+    """NVIDIA's frames are torch tensors: torch.uint8 isn't np.uint8, and the camera took them for HDR and went off."""
+    sink = CameraSink(Settings({"vcam": True}), name=ring_name)
+    reader = Ring(ring_name)
+    reader.w, reader.h = 64, 32
+    reader.beat_as_reader()
+    f = torch.full((32, 64, 3), 9, dtype=torch.uint8)
+    sink.write(f, ideal=time.perf_counter())
+    assert sink.off_why is None and sink.sent == 1
+    assert np.array_equal(reader.read(0)[1], f.numpy())
+    sink.close(), reader.close()
+
+
+@pytest.mark.skipif(not (WINDOWS and torch.cuda.is_available()), reason="needs an NVIDIA card")
+def test_cuda_frames_are_copied_off_the_gpu_queue(ring_name):
+    sink = CameraSink(Settings({"vcam": True}), name=ring_name)
+    reader = Ring(ring_name)
+    reader.w, reader.h = 64, 32
+    frames = [torch.full((32, 64, 3), k, dtype=torch.uint8, device="cuda") for k in range(20)]
+    for k, f in enumerate(frames):
+        reader.beat_as_reader()
+        sink.write(f, ideal=time.perf_counter())
+        f.fill_(255)  # the buffer reused straight away (later work on the same stream): the copy came first
+    deadline = time.perf_counter() + 2
+    while sink.sent + sink._copy.dropped < len(frames) and time.perf_counter() < deadline:
+        time.sleep(0.01)
+    assert sink._copy is not None and sink.sent >= 1
+    seq = reader.read_header()["write_seq"] - 1
+    ideal, got = reader.read(seq)
+    assert got.max() < 255 and (got == got[0, 0, 0]).all()  # a whole frame, from before the fill
+    sink.close(), reader.close()
